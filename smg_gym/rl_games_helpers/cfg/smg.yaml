@@ -1,9 +1,23 @@
 # if given, will override the device setting in gym.
 env:
-  numEnvs: 512
-  envSpacing: 4.0
+  numEnvs: 4
+  episodeLength: 500
+  envSpacing: 0.5
   resetDist: 3.0
-  maxEffort: 400.0
+  dofSpeedScale: 10.0
 
 task:
   randomize: False
+
+sim:
+  substeps: 2
+  physx:
+    num_threads: 1
+    solver_type: 1  # 0: pgs, 1: tgs
+    num_position_iterations: 4
+    num_velocity_iterations: 1
+    contact_offset: 0.01
+    # rest_offset: 0.0
+    # bounce_threshold_velocity: 0.2
+    # max_depenetration_velocity: 1000.0
+    # default_buffer_size_multiplier: 5.0

@@ -96,7 +96,6 @@ def load_hand():
     asset_options.vhacd_enabled = False
     asset_options.flip_visual_attachments = False
 
-
     hand_asset = gym.load_asset(sim, asset_root, asset_file, asset_options)
 
     return hand_asset
@@ -431,7 +430,7 @@ while not gym.query_viewer_has_closed(viewer):
 
     # update the viewer
     if enable_viewer_sync:
-        
+
         # draw contacts for first env
         # gym.draw_env_rigid_contacts(viewer, envs[0], colors[0], 0.25, True)
 

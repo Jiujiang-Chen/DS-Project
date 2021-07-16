@@ -50,17 +50,26 @@ def parse_task(args, cfg, cfg_train, sim_params):
     elif args.task_type == "Python":
         print("Python")
 
-        try:
-            task = eval(args.task)(
-                cfg=cfg,
-                sim_params=sim_params,
-                physics_engine=args.physics_engine,
-                device_type=args.device,
-                device_id=device_id,
-                headless=args.headless)
-        except NameError as e:
-            print(e)
-            warn_task_name()
+        # TODO: put back
+        task = eval(args.task)(
+            cfg=cfg,
+            sim_params=sim_params,
+            physics_engine=args.physics_engine,
+            device_type=args.device,
+            device_id=device_id,
+            headless=args.headless)
+
+        # try:
+        #     task = eval(args.task)(
+        #         cfg=cfg,
+        #         sim_params=sim_params,
+        #         physics_engine=args.physics_engine,
+        #         device_type=args.device,
+        #         device_id=device_id,
+        #         headless=args.headless)
+        # except NameError as e:
+        #     print(e)
+        #     warn_task_name()
         env = VecTaskPython(task, rl_device)
 
     return task, env
