@@ -22,7 +22,7 @@ params:
           val: 0
         fixed_sigma: True
     mlp:
-      units: [32, 32]
+      units: [512, 512, 256, 128]
       activation: elu
 
       initializer:
@@ -43,21 +43,26 @@ params:
     reward_shaper:
       scale_value: 0.1
     normalize_advantage: True
-    gamma: 0.99
+    gamma: 0.999
     tau: 0.95
     learning_rate: 3e-4
     lr_schedule: adaptive
     lr_threshold: 0.008
     score_to_win: 20000
-    max_epochs: 100
-    save_best_after: 50
-    save_frequency: 25
+    max_epochs: 1000
+    save_best_after: 250
+    save_frequency: 100
     grad_norm: 1.0
     entropy_coef: 0.0
     truncate_grads: True
     e_clip: 0.2
-    steps_num: 256
-    minibatch_size: 1024
+
+    # steps_num: 1024
+    # minibatch_size: 32
+
+    steps_num: 32
+    minibatch_size: 32768
+
     mini_epochs: 8
     critic_coef: 4
     clip_value: True

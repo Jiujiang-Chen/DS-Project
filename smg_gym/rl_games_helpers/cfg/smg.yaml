@@ -1,10 +1,15 @@
 # if given, will override the device setting in gym.
 env:
-  numEnvs: 4
-  episodeLength: 500
+
+  # numEnvs: 4
+  # numEnvs: 1024
+  numEnvs: 4096
+
+  episodeLength: 1000
   envSpacing: 0.5
   resetDist: 3.0
   dofSpeedScale: 10.0
+  fallResetDist: 0.075
 
 task:
   randomize: False
