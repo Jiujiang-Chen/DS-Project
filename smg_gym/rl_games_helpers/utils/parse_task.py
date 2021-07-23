@@ -5,7 +5,9 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-from smg_gym.rl_envs.base_hand_env import ShadowModularGrasper
+from smg_gym.rl_envs.smg_pivot import SMGPivot
+from smg_gym.rl_envs.smg_rotate import SMGRotate
+from smg_gym.rl_envs.smg_manip import SMGManip
 
 from isaacgym import rlgpu
 from rlgpu.tasks.base.vec_task import VecTaskCPU, VecTaskGPU, VecTaskPython

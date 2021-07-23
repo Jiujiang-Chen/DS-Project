@@ -25,7 +25,7 @@ def set_np_formatting():
 
 def warn_task_name():
     raise Exception(
-        "Unrecognized task!\nTask should be one of: [ShadowModularGrasper]")
+        "Unrecognized task!\nTask should be one of: [SMGPivot, SMGRotate, SMGManip, SMGGrasp]")
 
 
 def set_seed(seed, torch_deterministic=False):
@@ -56,8 +56,14 @@ def set_seed(seed, torch_deterministic=False):
 
 
 def retrieve_cfg(args, use_rlg_config=False):
-    if args.task == "ShadowModularGrasper":
-        return os.path.join(args.logdir, "smg"), "cfg/train/rlg/rlg_smg.yaml", "cfg/smg.yaml"
+    if args.task == "SMGPivot":
+        return os.path.join(args.logdir, "smg_pivot"), "cfg/train/rlg/rlg_smg_pivot.yaml", "cfg/smg_pivot.yaml"
+    elif args.task == "SMGRotate":
+        return os.path.join(args.logdir, "smg_rotate"), "cfg/train/rlg/rlg_smg_rotate.yaml", "cfg/smg_rotate.yaml"
+    elif args.task == "SMGManip":
+        return os.path.join(args.logdir, "smg_manip"), "cfg/train/rlg/rlg_smg_manip.yaml", "cfg/smg_manip.yaml"
+    elif args.task == "SMGGrasp":
+        return os.path.join(args.logdir, "smg_grasp"), "cfg/train/rlg/rlg_smg_grasp.yaml", "cfg/smg_grasp.yaml"
     else:
         warn_task_name()
 

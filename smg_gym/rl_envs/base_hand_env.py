@@ -7,27 +7,32 @@ from rlgpu.utils.torch_jit_utils import *
 from rlgpu.tasks.base.base_task import BaseTask
 from isaacgym import gymtorch
 from isaacgym import gymapi
+from isaacgym import gymutil
 
+from smg_gym.rl_games_helpers.utils.torch_jit_utils import randomize_rotation, quat_axis
 from smg_gym.assets import get_assets_path, add_assets_path
 from pybullet_object_models import primitive_objects as object_set
 
-class ShadowModularGrasper(BaseTask):
+class BaseShadowModularGrasper(BaseTask):
 
     def __init__(self, cfg, sim_params, physics_engine, device_type, device_id, headless):
+
         self.cfg = cfg
         self.sim_params = sim_params
         self.physics_engine = physics_engine
 
         self.num_envs = self.cfg["env"]["numEnvs"]
         self.max_episode_length = self.cfg["env"]["episodeLength"]
-        self.reset_dist = self.cfg["env"]["resetDist"]
-        self.dof_speed_scale = self.cfg["env"]["dofSpeedScale"]
+        self.debug_viz = self.cfg["env"]["enableDebugVis"]
         self.fall_reset_dist = self.cfg["env"]["fallResetDist"]
 
-        # obs = joint_pos + joint_vel + obj_pose + obj_vel + prev_actions + tip_contacts
-        # n_obs =   9     +     9     +    7     +    6    +     9        +    3 = 40
-        self.cfg["env"]["numObservations"] = 43
-        self.cfg["env"]["numActions"] = 9
+        self.use_relative_control = self.cfg["env"]["useRelativeControl"]
+        self.dof_speed_scale = self.cfg["env"]["dofSpeedScale"]
+        self.act_moving_average = self.cfg["env"]["actionsMovingAverage"]
+
+        self.randomize = self.cfg["task"]["randomize"]
+        self.rand_hand_joints = self.cfg["task"]["randHandJoints"]
+        self.rand_init_orn = self.cfg["task"]["randInitOrn"]
 
         self.cfg["device_type"] = device_type
         self.cfg["device_id"] = device_id
@@ -47,6 +52,10 @@ class ShadowModularGrasper(BaseTask):
         rigid_body_tensor = self.gym.acquire_rigid_body_state_tensor(self.sim)
         contact_force_tensor = self.gym.acquire_net_contact_force_tensor(self.sim)
 
+        # get useful numbers
+        self.n_sim_bodies = self.gym.get_sim_rigid_body_count(self.sim)
+        self.n_env_bodies = self.gym.get_sim_rigid_body_count(self.sim) // self.num_envs
+
         # create views of actor_root tensor
         # shape = (num_environments, num_actors * 13)
         # 13 -> position([0:3]), rotation([3:7]), linear velocity([7:10]), angular velocity([10:13])
@@ -57,11 +66,18 @@ class ShadowModularGrasper(BaseTask):
         self.dof_pos = self.dof_state.view(self.num_envs, self.n_hand_dofs, 2)[..., 0]
         self.dof_vel = self.dof_state.view(self.num_envs, self.n_hand_dofs, 2)[..., 1]
 
+        # create views of rigid body states
+        # shape = (num_environments, num_bodies * 13)
+        self.rigid_body_tensor = gymtorch.wrap_tensor(rigid_body_tensor).view(self.num_envs, self.n_env_bodies, 13)
+
         # create views of contact_force tensor
         # default shape = (n_envs, n_bodies * 3)
-        self.n_sim_bodies = self.gym.get_sim_rigid_body_count(self.sim)
-        self.n_env_bodies = self.gym.get_sim_rigid_body_count(self.sim) // self.num_envs
         self.contact_force_tensor = gymtorch.wrap_tensor(contact_force_tensor).view(self.num_envs, self.n_env_bodies, 3)
+
+        # setup useful incices
+        self.x_unit_tensor = to_torch([1, 0, 0], dtype=torch.float, device=self.device).repeat((self.num_envs, 1))
+        self.y_unit_tensor = to_torch([0, 1, 0], dtype=torch.float, device=self.device).repeat((self.num_envs, 1))
+        self.z_unit_tensor = to_torch([0, 0, 1], dtype=torch.float, device=self.device).repeat((self.num_envs, 1))
 
         # refresh all tensors
         self.refresh_tensors()
@@ -89,7 +105,7 @@ class ShadowModularGrasper(BaseTask):
 
         self.gym.add_ground(self.sim, plane_params)
 
-    def _get_hand_asset(self):
+    def _setup_hand(self):
 
         asset_root = add_assets_path('robot_assets/smg')
         asset_file =  "smg_tactip.urdf"
@@ -127,25 +143,53 @@ class ShadowModularGrasper(BaseTask):
         self.cur_targets = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
 
         # used to randomise the initial pose of the hand
-        self.init_joint_mins = to_torch(np.array([
-            -20.0*(np.pi/180),
-            7.5*(np.pi/180),
-            -10.0*(np.pi/180),
-        ] * 3))
+        if self.randomize and self.rand_hand_joints:
+            self.init_joint_mins = to_torch(np.array([
+                -20.0*(np.pi/180),
+                7.5*(np.pi/180),
+                -10.0*(np.pi/180),
+            ] * 3))
 
-        self.init_joint_maxs = to_torch(np.array([
-            20.0*(np.pi/180),
-            7.5*(np.pi/180),
-            -10.0*(np.pi/180),
-        ] * 3))
+            self.init_joint_maxs = to_torch(np.array([
+                20.0*(np.pi/180),
+                7.5*(np.pi/180),
+                -10.0*(np.pi/180),
+            ] * 3))
+
+        else:
+            self.init_joint_mins = to_torch(np.array([
+                0.0*(np.pi/180),
+                7.5*(np.pi/180),
+                -10.0*(np.pi/180),
+            ] * 3))
+
+            self.init_joint_maxs = to_torch(np.array([
+                0.0*(np.pi/180),
+                7.5*(np.pi/180),
+                -10.0*(np.pi/180),
+            ] * 3))
+
+        # get hand limits
+        hand_dof_props = self.gym.get_asset_dof_properties(hand_asset)
+
+        self.hand_dof_lower_limits = []
+        self.hand_dof_upper_limits = []
+
+        for i in range(self.n_hand_dofs):
+            self.hand_dof_lower_limits.append(hand_dof_props['lower'][i])
+            self.hand_dof_upper_limits.append(hand_dof_props['upper'][i])
+
+        self.hand_dof_lower_limits = to_torch(self.hand_dof_lower_limits, device=self.device)
+        self.hand_dof_upper_limits = to_torch(self.hand_dof_upper_limits, device=self.device)
 
         return hand_asset
 
-    def _get_obj_asset(self):
+    def _setup_obj(self):
+        self.obj_name = 'sphere'
 
         model_list = object_set.getModelList()
         asset_root = object_set.getDataPath()
-        asset_file = os.path.join('sphere', "model.urdf")
+        asset_file = os.path.join(self.obj_name, "model.urdf")
         asset_options = gymapi.AssetOptions()
         asset_options.disable_gravity = False
         asset_options.fix_base_link = False
@@ -164,11 +208,45 @@ class ShadowModularGrasper(BaseTask):
 
         return obj_asset
 
+
+    def _setup_keypoints(self, color=(1,0,0)):
+
+        self.kp_dist = 0.05
+        self.n_keypoints = 3
+
+        kp_positions = [
+            torch.zeros(size=(self.num_envs, self.n_keypoints), device=self.device),
+            torch.zeros(size=(self.num_envs, self.n_keypoints), device=self.device),
+            torch.zeros(size=(self.num_envs, self.n_keypoints), device=self.device),
+        ]
+
+        kp_geoms = []
+        kp_geoms.append(self._get_kp_geom(color=(1,0,0)))
+        kp_geoms.append(self._get_kp_geom(color=(0,1,0)))
+        kp_geoms.append(self._get_kp_geom(color=(0,0,1)))
+
+        return kp_geoms, kp_positions
+
+    def _get_kp_geom(self, color=(1,0,0)):
+
+        sphere_pose = gymapi.Transform(
+            p=gymapi.Vec3(0.0, 0.0, 0.0),
+            r=gymapi.Quat(0, 0, 0, 1)
+        )
+
+        sphere_geom = gymutil.WireframeSphereGeometry(
+            0.01, # rad
+            12, # n_lat
+            12, # n_lon
+            sphere_pose,
+            color=color
+        )
+        return sphere_geom
+
     def _get_contact_idxs(self, env, obj_actor_handle, hand_actor_handle):
 
         obj_body_name = self.gym.get_actor_rigid_body_names(env, obj_actor_handle)
         obj_body_idx = self.gym.find_actor_rigid_body_index(env, obj_actor_handle, obj_body_name[0], gymapi.DOMAIN_ENV)
-
 
         hand_body_names = self.gym.get_actor_rigid_body_names(env, hand_actor_handle)
         tip_body_names = [name for name in hand_body_names if 'tactip_tip' in name]
@@ -176,12 +254,21 @@ class ShadowModularGrasper(BaseTask):
 
         return obj_body_idx, tip_body_idxs
 
+    def _get_sensor_tcp_idxs(self, env, hand_actor_handle):
+
+        hand_body_names = self.gym.get_actor_rigid_body_names(env, hand_actor_handle)
+        tcp_body_names = [name for name in hand_body_names if 'tcp' in name]
+        tcp_body_idxs = [self.gym.find_actor_rigid_body_index(env, hand_actor_handle, name, gymapi.DOMAIN_ENV) for name in tcp_body_names]
+
+        return tcp_body_idxs
+
     def _create_envs(self, num_envs, spacing, num_per_row):
         lower = gymapi.Vec3(-spacing, -spacing, 0.0)
         upper = gymapi.Vec3(spacing, spacing, spacing)
 
-        self.hand_asset = self._get_hand_asset()
-        self.obj_asset = self._get_obj_asset()
+        self.hand_asset = self._setup_hand()
+        self.obj_asset = self._setup_obj()
+        self.obj_kp_geoms, self.obj_kp_positions = self._setup_keypoints()
 
         # collect useful indeces and handles
         self.envs = []
@@ -226,7 +313,7 @@ class ShadowModularGrasper(BaseTask):
         # get indices useful for contacts
         self.n_tips = 3
         self.obj_body_idx, self.tip_body_idxs = self._get_contact_idxs(env_ptr, obj_actor_handle, hand_actor_handle)
-
+        self.tcp_body_idxs = self._get_sensor_tcp_idxs(env_ptr, hand_actor_handle)
 
     def _create_hand_actor(self, env_ptr, idx):
 
@@ -266,7 +353,7 @@ class ShadowModularGrasper(BaseTask):
 
         return handle
 
-    def get_tip_contacts(self, env_ids):
+    def get_tip_contacts(self):
 
         # get envs where obj is contacted
         obj_contacts = torch.where(
@@ -291,23 +378,57 @@ class ShadowModularGrasper(BaseTask):
             tip_contacts,
             torch.zeros(size=(self.num_envs, self.n_tips), device=self.device)
         )
-
         n_tip_contacts = torch.sum(tip_contacts, dim=1)
 
         return tip_contacts, n_tip_contacts
 
+    def update_obj_keypoints(self):
 
-    def compute_observations(self, env_ids=None):
+        # update the current keypoint positions
+        for i in range(self.n_keypoints):
+            self.obj_kp_positions[i] = self.obj_base_pos + quat_axis(self.obj_base_orn, axis=i) * self.kp_dist
 
-        # I think this deals with reset envs
-        if env_ids is None:
-            env_ids = np.arange(self.num_envs)
+        # visualise keypoints
+        if self.viewer and self.debug_viz:
 
-        self.tip_contacts, self.n_tip_contacts = self.get_tip_contacts(env_ids)
+            self.gym.clear_lines(self.viewer)
+
+            for i in range(self.num_envs):
+                for j in range(self.n_keypoints):
+                    pose = gymapi.Transform()
+
+                    pose.p = gymapi.Vec3(
+                        self.obj_kp_positions[j][i,0],
+                        self.obj_kp_positions[j][i,1],
+                        self.obj_kp_positions[j][i,2]
+                    )
+
+                    pose.r = gymapi.Quat(0, 0, 0, 1)
+
+                    gymutil.draw_lines(
+                        self.obj_kp_geoms[j],
+                        self.gym,
+                        self.viewer,
+                        self.envs[i],
+                        pose
+                    )
+
+
+    def compute_observations(self):
+
+        # get which tips are in contact
+        self.tip_contacts, self.n_tip_contacts = self.get_tip_contacts()
+
+        # get tcp positions
+        tcp_states = self.rigid_body_tensor[:, self.tcp_body_idxs, :]
+        self.tcp_pos = tcp_states[..., 0:3].reshape(self.num_envs, 9)
+        # self.tcp_orn = tcp_states[..., 3:7]
+        # self.tcp_linvel = tcp_states[..., 7:10]
+        # self.tcp_angvel = tcp_states[..., 10:13]
 
         # get hand joint pos and vel
-        self.hand_joint_pos = self.dof_pos[env_ids, :].squeeze()
-        self.hand_joint_vel = self.dof_vel[env_ids, :].squeeze()
+        self.hand_joint_pos = self.dof_pos[:, :].squeeze()
+        self.hand_joint_vel = self.dof_vel[:, :].squeeze()
 
         # get object pose / vel
         self.obj_base_pos = self.root_state_tensor[self.obj_indices, 0:3]
@@ -316,16 +437,25 @@ class ShadowModularGrasper(BaseTask):
         self.obj_base_angvel = self.root_state_tensor[self.obj_indices, 10:13]
 
         # get keypoint positions
+        self.update_obj_keypoints()
 
         # obs_buf shape=(num_envs, num_obs)
-        self.obs_buf[env_ids, :9] = self.hand_joint_pos
-        self.obs_buf[env_ids, 9:18] = self.hand_joint_vel
-        self.obs_buf[env_ids, 18:21] = self.obj_base_pos
-        self.obs_buf[env_ids, 21:25] = self.obj_base_orn
-        self.obs_buf[env_ids, 25:28] = self.obj_base_linvel
-        self.obs_buf[env_ids, 28:31] = self.obj_base_angvel
-        self.obs_buf[env_ids, 31:40] = self.actions
-        self.obs_buf[env_ids, 40:43] = self.tip_contacts
+        self.obs_buf[:, :9] = unscale(
+            self.hand_joint_pos,
+            self.hand_dof_lower_limits,
+            self.hand_dof_upper_limits
+        )
+        self.obs_buf[:, 9:18] = self.hand_joint_vel
+        self.obs_buf[:, 18:21] = self.obj_base_pos
+        self.obs_buf[:, 21:25] = self.obj_base_orn
+        self.obs_buf[:, 25:28] = self.obj_base_linvel
+        self.obs_buf[:, 28:31] = self.obj_base_angvel
+        self.obs_buf[:, 31:40] = self.actions
+        self.obs_buf[:, 40:43] = self.tip_contacts
+        self.obs_buf[:, 43:46] = self.obj_kp_positions[0]
+        self.obs_buf[:, 46:49] = self.obj_kp_positions[1]
+        self.obs_buf[:, 49:52] = self.obj_kp_positions[2]
+        self.obs_buf[:, 52:61] = self.tcp_pos
 
         return self.obs_buf
 
@@ -334,21 +464,7 @@ class ShadowModularGrasper(BaseTask):
         Reward computed after observation so vars set in compute_obs can
         be used here
         """
-
-        init_obj_pos = self.init_obj_states[..., :3]
-
-        # retrieve environment observations from buffer
-        self.rew_buf[:], self.reset_buf[:] = compute_smg_reward(
-            self.obj_base_pos,
-            self.obj_base_angvel,
-            init_obj_pos,
-            self.n_tip_contacts ,
-            self.rew_buf,
-            self.reset_buf,
-            self.progress_buf,
-            self.max_episode_length,
-            self.fall_reset_dist
-        )
+        pass
 
 
     def reset(self, env_ids):
@@ -383,6 +499,18 @@ class ShadowModularGrasper(BaseTask):
 
         # reset object
         self.root_state_tensor[self.obj_indices[env_ids]] = self.init_obj_states[env_ids].clone()
+
+        # randomise rotation
+        if self.randomize and self.rand_init_orn:
+            rand_floats = torch_rand_float(-1.0, 1.0, (len(env_ids), 2), device=self.device)
+            new_object_rot = randomize_rotation(
+                rand_floats[:, 0],
+                rand_floats[:, 1],
+                self.x_unit_tensor[env_ids],
+                self.y_unit_tensor[env_ids]
+            )
+            self.root_state_tensor[self.obj_indices[env_ids], 3:7] = new_object_rot
+
         obj_ids_int32 = self.obj_indices[env_ids].to(torch.int32)
         self.gym.set_actor_root_state_tensor_indexed(
             self.sim,
@@ -402,7 +530,32 @@ class ShadowModularGrasper(BaseTask):
             self.reset(env_ids)
 
         self.actions = actions.clone().to(self.device)
-        self.cur_targets = self.prev_targets[:, self.control_joint_dof_indices] + self.dof_speed_scale * self.dt * self.actions
+
+        if self.use_relative_control:
+            targets = self.prev_targets[:, self.control_joint_dof_indices] + self.dof_speed_scale * self.dt * self.actions
+
+            self.cur_targets[:, self.control_joint_dof_indices] = tensor_clamp(
+                targets,
+                self.hand_dof_lower_limits[self.control_joint_dof_indices],
+                self.hand_dof_upper_limits[self.control_joint_dof_indices]
+            )
+        else:
+
+            self.cur_targets[:, self.control_joint_dof_indices] = scale(
+                self.actions,
+                self.hand_dof_lower_limits[self.control_joint_dof_indices],
+                self.hand_dof_upper_limits[self.control_joint_dof_indices]
+            )
+
+            self.cur_targets[:, self.control_joint_dof_indices] = \
+                self.act_moving_average * self.cur_targets[:, self.control_joint_dof_indices] + \
+                (1.0 - self.act_moving_average) * self.prev_targets[:, self.control_joint_dof_indices]
+
+            self.cur_targets[:, self.control_joint_dof_indices] = tensor_clamp(
+                self.cur_targets[:, self.control_joint_dof_indices],
+                self.hand_dof_lower_limits[self.control_joint_dof_indices],
+                self.hand_dof_upper_limits[self.control_joint_dof_indices]
+            )
 
         self.prev_targets[:, self.control_joint_dof_indices] = self.cur_targets[:, self.control_joint_dof_indices]
         self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.cur_targets))
@@ -421,37 +574,3 @@ class ShadowModularGrasper(BaseTask):
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_rigid_body_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
-
-#####################################################################
-###=========================jit functions=========================###
-#####################################################################
-
-@torch.jit.script
-def compute_smg_reward(
-        obj_base_pos: Tensor,
-        obj_base_angvel: Tensor,
-        init_obj_pos: Tensor,
-        n_tip_contacts : Tensor,
-        rew_buf: Tensor,
-        reset_buf: Tensor,
-        progress_buf: Tensor,
-        max_episode_length: float,
-        fall_reset_dist: float
-    ): # -> Tuple[Tensor, Tensor]
-
-    # angular velocity around z axis (simplest case)
-    reward = torch.ones_like(rew_buf) * obj_base_angvel[..., 1]
-
-    # zero reward when less than 2 tips in contact
-    reward = torch.where(n_tip_contacts < 2, torch.zeros_like(rew_buf), reward)
-
-    # set envs to terminate when reach criteria
-
-    # end of episode
-    reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), reset_buf)
-
-    # obj droped too far
-    dist_from_start = torch.norm(obj_base_pos - init_obj_pos, p=2, dim=-1)
-    reset = torch.where(dist_from_start >= fall_reset_dist, torch.ones_like(reset_buf), reset)
-
-    return reward, reset

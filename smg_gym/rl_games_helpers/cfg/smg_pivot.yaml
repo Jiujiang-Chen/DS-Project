@@ -3,16 +3,25 @@ env:
 
   # numEnvs: 4
   # numEnvs: 1024
-  numEnvs: 4096
+  # numEnvs: 4096
+  numEnvs: 16384
 
-  episodeLength: 1000
   envSpacing: 0.5
-  resetDist: 3.0
-  dofSpeedScale: 10.0
+  enableDebugVis: True
+
+  # action settings
+  useRelativeControl: True
+  dofSpeedScale: 20.0
+  actionsMovingAverage: 1.0
+
+  # constructing reward/termination
+  episodeLength: 1000
   fallResetDist: 0.075
 
 task:
   randomize: False
+  randHandJoints: False
+  randInitOrn: False
 
 sim:
   substeps: 2

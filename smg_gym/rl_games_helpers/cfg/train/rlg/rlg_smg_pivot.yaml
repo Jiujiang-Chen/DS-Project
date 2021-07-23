@@ -34,7 +34,7 @@ params:
   load_path: nn/Cartpole.pth
 
   config:
-    name: ShadowModularGrasper
+    name: SMGPivot
     env_name: rlgpu
     ppo: True
     mixed_precision: False
@@ -43,11 +43,12 @@ params:
     reward_shaper:
       scale_value: 0.1
     normalize_advantage: True
-    gamma: 0.999
+    gamma: 0.99
     tau: 0.95
-    learning_rate: 3e-4
+    learning_rate: 5e-4
     lr_schedule: adaptive
-    lr_threshold: 0.008
+    schedule_type: standard
+    lr_threshold: 0.016
     score_to_win: 20000
     max_epochs: 1000
     save_best_after: 250
@@ -58,7 +59,7 @@ params:
     e_clip: 0.2
 
     # steps_num: 1024
-    # minibatch_size: 32
+    # minibatch_size: 256
 
     steps_num: 32
     minibatch_size: 32768

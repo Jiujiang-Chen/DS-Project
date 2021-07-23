@@ -9,6 +9,17 @@ import torch
 import numpy as np
 from isaacgym.torch_utils import *
 
+@torch.jit.script
+def randomize_rotation(rand0, rand1, x_unit_tensor, y_unit_tensor):
+    return quat_mul(quat_from_angle_axis(rand0 * np.pi, x_unit_tensor),
+                    quat_from_angle_axis(rand1 * np.pi, y_unit_tensor))
+
+@torch.jit.script
+def quat_axis(q, axis=0):
+    # type: (Tensor, int) -> Tensor
+    basis_vec = torch.zeros(q.shape[0], 3, device=q.device)
+    basis_vec[:, axis] = 1
+    return quat_rotate(q, basis_vec)
 
 @torch.jit.script
 def compute_heading_and_up(

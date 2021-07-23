@@ -1,0 +1,37 @@
+# if given, will override the device setting in gym.
+env:
+
+  # numEnvs: 4
+  # numEnvs: 1024
+  # numEnvs: 4096
+  numEnvs: 16384
+
+  envSpacing: 0.5
+  enableDebugVis: True
+
+  # action settings
+  useRelativeControl: True
+  dofSpeedScale: 20.0
+  actionsMovingAverage: 1.0
+
+  # constructing reward/termination
+  episodeLength: 1000
+  fallResetDist: 0.075
+
+task:
+  randomize: True
+  randHandJoints: True
+  randInitOrn: False
+
+sim:
+  substeps: 2
+  physx:
+    num_threads: 1
+    solver_type: 1  # 0: pgs, 1: tgs
+    num_position_iterations: 4
+    num_velocity_iterations: 1
+    contact_offset: 0.01
+    # rest_offset: 0.0
+    # bounce_threshold_velocity: 0.2
+    # max_depenetration_velocity: 1000.0
+    # default_buffer_size_multiplier: 5.0
