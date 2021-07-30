@@ -14,18 +14,20 @@ env:
   dofSpeedScale: 20.0
   actionsMovingAverage: 1.0
 
-  # constructing reward/termination
+  # reward/termination
   episodeLength: 1000
   distRewardScale: -10.0
   rotRewardScale: 1.0
-  rotEps: 0.1
+  requireContact: True
+  contactRewardScale: 0.0
   actionPenaltyScale: -0.0002
+  successTolerance: 0.1
   reachGoalBonus: 250
   fallResetDist: 0.15
   fallPenalty: 0.0
-  successTolerance: 0.1
   maxConsecutiveSuccesses: 0
   avFactor: 0.01
+  rotEps: 0.1
 
 task:
   randomize: True

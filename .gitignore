@@ -1,5 +1,7 @@
 **/nn/
 **/runs/
+**/reference_runs/
+**/keep/
 **/venv/
 **/.idea/
 *.pyo

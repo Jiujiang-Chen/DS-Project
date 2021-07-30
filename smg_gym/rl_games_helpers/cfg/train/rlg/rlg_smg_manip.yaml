@@ -30,6 +30,15 @@ params:
       regularizer:
         name: None
 
+    # rnn:
+    #   name: lstm
+    #   units: 256
+    #   layers: 1
+    #   before_mlp: False
+    #   concat_input: True
+    #   layer_norm: True
+
+
   load_checkpoint: False
   load_path: nn/SMGManip.pth
 
@@ -50,9 +59,9 @@ params:
     schedule_type: standard
     lr_threshold: 0.016
     score_to_win: 100000
-    max_epochs: 5000
-    save_best_after: 500
-    save_frequency: 200
+    max_epochs: 500
+    save_best_after: 250
+    save_frequency: 250
     grad_norm: 1.0
     entropy_coef: 0.0
     truncate_grads: True

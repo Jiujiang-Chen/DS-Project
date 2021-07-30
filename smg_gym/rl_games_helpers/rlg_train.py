@@ -76,7 +76,7 @@ class RLGPUAlgoObserver(AlgoObserver):
     def after_print_stats(self, frame, epoch_num, total_time):
         if self.consecutive_successes.current_size > 0:
             mean_con_successes = self.consecutive_successes.get_mean()
-            self.writer.add_scalar('successes/consecutive_successes/mean', mean_con_successes, frame)
+            self.writer.add_scalar('successes/consecutive_successes/frame', mean_con_successes, frame)
             self.writer.add_scalar('successes/consecutive_successes/iter', mean_con_successes, epoch_num)
             self.writer.add_scalar('successes/consecutive_successes/time', mean_con_successes, total_time)
 

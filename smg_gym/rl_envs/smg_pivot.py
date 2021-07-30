@@ -3,7 +3,11 @@ import os
 import torch
 from torch import Tensor
 from rlgpu.utils.torch_jit_utils import *
+from isaacgym import gymtorch
+from isaacgym import gymapi
+from isaacgym import gymutil
 
+from smg_gym.rl_games_helpers.utils.torch_jit_utils import randomize_rotation, quat_axis
 from smg_gym.rl_envs.base_hand_env import BaseShadowModularGrasper
 
 class SMGPivot(BaseShadowModularGrasper):
@@ -25,13 +29,21 @@ class SMGPivot(BaseShadowModularGrasper):
         obj_vel (6)
         prev_actions (9)
         tip_contacts (3)
-        keypoint_pos (9)
+        obj_keypoint_pos (9)
         tcp_pos (9)
+        goal_pose (7)
+        goal_keypoint_pos (9)
+        rel_goal_orn (4)
 
-        total = 61
+        total = 81
         """
-        cfg["env"]["numObservations"] = 61
+        cfg["env"]["numObservations"] = 81
         cfg["env"]["numActions"] = 9
+
+        # what object to use
+        self.obj_name = 'sphere'
+        # self.obj_name = 'cube'
+        # self.obj_name = 'icosahedron'
 
         super(SMGPivot, self).__init__(
             cfg,
@@ -42,63 +54,43 @@ class SMGPivot(BaseShadowModularGrasper):
             headless
         )
 
-    def compute_reward(self):
-        """
-        Reward computed after observation so vars set in compute_obs can
-        be used here
-        """
 
-        init_obj_pos = self.init_obj_states[..., :3]
 
-        # retrieve environment observations from buffer
-        self.rew_buf[:], self.reset_buf[:] = compute_pivot_reward(
-            self.obj_base_pos,
-            self.obj_base_orn,
-            self.obj_base_angvel,
-            init_obj_pos,
-            self.n_tip_contacts ,
-            self.rew_buf,
-            self.reset_buf,
-            self.progress_buf,
-            self.max_episode_length,
-            self.fall_reset_dist
+    def reset_target_pose(self, env_ids, apply_reset=False):
+
+        # rand floats shape (n_envs, 3)
+        rand_floats = torch_rand_float(-1.0, 1.0, (len(env_ids), 3), device=self.device)
+
+        # based on 3rd float zero half for pivoting around either x or y axis
+        rand_floats[:, 0] = torch.where(
+            rand_floats[:, 2] > 0,
+            torch.zeros(size=(len(env_ids),), device=self.device),
+            rand_floats[:, 0],
+        )
+        rand_floats[:, 1] = torch.where(
+            rand_floats[:, 2] <= 0,
+            torch.zeros(size=(len(env_ids),), device=self.device),
+            rand_floats[:, 1],
         )
 
+        # pivot 1
+        new_goal_rot = randomize_rotation(
+            rand_floats[:, 0],
+            rand_floats[:, 1],
+            self.x_unit_tensor[env_ids],
+            self.y_unit_tensor[env_ids]
+        )
 
-#####################################################################
-###=========================jit functions=========================###
-#####################################################################
+        self.root_state_tensor[self.goal_indices[env_ids]] = self.init_goal_states[env_ids].clone()
+        self.root_state_tensor[self.goal_indices[env_ids], 3:7] = new_goal_rot
 
-@torch.jit.script
-def compute_pivot_reward(
-        obj_base_pos: Tensor,
-        obj_base_orn: Tensor,
-        obj_base_angvel: Tensor,
-        init_obj_pos: Tensor,
-        n_tip_contacts : Tensor,
-        rew_buf: Tensor,
-        reset_buf: Tensor,
-        progress_buf: Tensor,
-        max_episode_length: float,
-        fall_reset_dist: float
-    ): # -> Tuple[Tensor, Tensor]
+        if apply_reset:
+            goal_object_indices = self.goal_indices[env_ids].to(torch.int32)
+            self.gym.set_actor_root_state_tensor_indexed(
+                self.sim,
+                gymtorch.unwrap_tensor(self.root_state_tensor),
+                gymtorch.unwrap_tensor(goal_object_indices),
+                len(env_ids)
+            )
 
-    # convert obj angvel into object baseframe
-    # obj_angvel_objframe = quat_rotate(obj_base_orn, obj_base_angvel)
-
-    # angular velocity around y axis
-    reward = torch.ones_like(rew_buf) * obj_base_angvel[..., 1]
-
-    # zero reward when less than 2 tips in contact
-    reward = torch.where(n_tip_contacts < 2, torch.zeros_like(rew_buf), reward)
-
-    # set envs to terminate when reach criteria
-
-    # end of episode
-    reset = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), reset_buf)
-
-    # obj droped too far
-    dist_from_start = torch.norm(obj_base_pos - init_obj_pos, p=2, dim=-1)
-    reset = torch.where(dist_from_start >= fall_reset_dist, torch.ones_like(reset_buf), reset)
-
-    return reward, reset
+        self.reset_goal_buf[env_ids] = 0
