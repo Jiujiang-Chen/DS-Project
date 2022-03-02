@@ -1,0 +1,59 @@
+# used to create the object
+name: smg_rotate
+
+physics_engine: ${..physics_engine}
+
+# if given, will override the device setting in gym.
+env:
+  # numEnvs: 4
+  # numEnvs: 1024
+  numEnvs: 4096
+  # numEnvs: 16384
+
+  envSpacing: 0.5
+  enableDebugVis: True
+
+  # action settings
+  useRelativeControl: True
+  dofSpeedScale: 20.0
+  actionsMovingAverage: 1.0
+
+  # reward/termination
+  episodeLength: 1000
+  distRewardScale: -10.0
+  rotRewardScale: 1.0
+  requireContact: False
+  contactRewardScale: 0.0
+  actionPenaltyScale: -0.0002
+  successTolerance: 0.1
+  reachGoalBonus: 250
+  fallResetDist: 0.15
+  fallPenalty: 0.0
+  maxConsecutiveSuccesses: 0
+  avFactor: 0.01
+  rotEps: 0.1
+
+task:
+  randomize: True
+  randHandJoints: True
+  randInitOrn: False
+
+sim:
+  dt: 0.01667 # 1/60
+  substeps: 2
+  up_axis: "z"
+  use_gpu_pipeline: ${eq:${...pipeline},"gpu"}
+  gravity: [0.0, 0.0, -9.81]
+  physx:
+    num_threads: ${....num_threads}
+    solver_type: ${....solver_type}
+    use_gpu: ${contains:"cuda",${....sim_device}}
+    num_position_iterations: 4
+    num_velocity_iterations: 1
+    max_gpu_contact_pairs: 8388608
+    contact_offset: 0.01
+    rest_offset: 0.0
+    bounce_threshold_velocity: 0.2
+    max_depenetration_velocity: 1000.0
+    default_buffer_size_multiplier: 5.0
+    contact_collection: 0
