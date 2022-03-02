@@ -51,6 +51,7 @@ params:
     kl_threshold: 0.016
     score_to_win: 100000
     max_epochs: ${resolve_default:5000,${....max_iterations}}
+    use_diagnostics: True
     save_best_after: 250
     save_frequency: 250
     grad_norm: 1.0
