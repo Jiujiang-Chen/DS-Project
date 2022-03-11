@@ -62,7 +62,7 @@ gym.subscribe_viewer_keyboard_event(viewer, gymapi.KEY_P, "toggle_viewer_sync")
 
 # add ground plane
 plane_params = gymapi.PlaneParams()
-plane_params.normal = gymapi.Vec3(0, 0, 1) # z-up!
+plane_params.normal = gymapi.Vec3(0, 0, 1)  # z-up!
 plane_params.distance = 0
 plane_params.static_friction = 0.0
 plane_params.dynamic_friction = 0.0
@@ -78,10 +78,12 @@ env_lower = gymapi.Vec3(-spacing, -spacing, 0.0)
 env_upper = gymapi.Vec3(spacing, spacing, spacing)
 
 # create ball asset with gravity disabled from pybullet-object_models
+
+
 def load_hand():
 
-    asset_root = add_assets_path('robot_assets/smg')
-    asset_file =  "smg_tactip.urdf"
+    asset_root = add_assets_path('robot_assets/smg_minitip')
+    asset_file = "smg_tactip.urdf"
 
     asset_options = gymapi.AssetOptions()
     asset_options.disable_gravity = True
@@ -99,6 +101,7 @@ def load_hand():
     hand_asset = gym.load_asset(sim, asset_root, asset_file, asset_options)
 
     return hand_asset
+
 
 def load_objects():
 
@@ -139,6 +142,7 @@ maxs = {
     "J3": 20.0*(np.pi/180),
 }
 
+
 def init_hand_joints(env, actor_handle):
 
     init_joint_pos = {}
@@ -159,6 +163,7 @@ def init_hand_joints(env, actor_handle):
     gym.set_actor_dof_states(env, actor_handle, [0.0]*num_control_dofs, gymapi.STATE_VEL)
 
     return init_joint_pos
+
 
 def add_hand_actor(env):
 
@@ -193,9 +198,10 @@ def add_hand_actor(env):
 
     return handle, control_handles, init_joint_pos
 
+
 def add_object_actor(env):
     pose = gymapi.Transform()
-    pose.p = gymapi.Vec3(0.0, 0.0, 0.245)
+    pose.p = gymapi.Vec3(0.0, 0.0, 0.275)
     pose.r = gymapi.Quat(0, 0, 0, 1)
 
     object_asset = np.random.choice(object_assets)
@@ -221,6 +227,7 @@ def get_object_state(env, obj_actor_handle):
     ang_vel = obj_state['vel']['angular']
 
     return pos, orn, lin_vel, ang_vel
+
 
 def apply_gravity_compensation_object(env, obj_actor_handle):
 
@@ -252,8 +259,10 @@ def pre_physics_step():
 
         current_joint_states[i] = targets
 
+
 def post_physics_step():
     pos, orn, lin_vel, ang_vel = get_object_state(envs[i], object_actor_handles[i])
+
 
 def apply_grasp_action(current_joint_states):
 
@@ -287,7 +296,8 @@ def get_tip_contacts(env, hand_actor_handle, obj_actor_handle):
 
     hand_body_names = gym.get_actor_rigid_body_names(env, hand_actor_handle)
     tip_body_names = [name for name in hand_body_names if 'tactip_tip' in name]
-    tip_body_idxs = [gym.find_actor_rigid_body_index(env, hand_actor_handle, name, gymapi.DOMAIN_ENV) for name in tip_body_names]
+    tip_body_idxs = [gym.find_actor_rigid_body_index(
+        env, hand_actor_handle, name, gymapi.DOMAIN_ENV) for name in tip_body_names]
 
     tip_contacts = [False] * len(tip_body_idxs)
 
@@ -310,7 +320,8 @@ def initialise_contact(current_joint_states):
 
     for i in range(max_steps):
 
-        if update_envs == []: break
+        if update_envs == []:
+            break
 
         for i in update_envs:
             apply_gravity_compensation_object(envs[i], object_actor_handles[i])
@@ -331,6 +342,7 @@ def initialise_contact(current_joint_states):
         gym.draw_viewer(viewer, sim, True)
         gym.sync_frame_time(sim)
 
+
 def reset():
     gym.set_sim_rigid_body_states(sim, initial_state, gymapi.STATE_ALL)
 
@@ -347,6 +359,7 @@ def reset():
     initialise_contact(current_joint_states)
 
     return current_joint_states
+
 
 # create hand asset
 hand_asset = load_hand()
@@ -409,8 +422,8 @@ while not gym.query_viewer_has_closed(viewer):
         if evt.action == "reset" and evt.value > 0:
             current_joint_states = reset()
 
-        if ( (evt.action == "quit" and evt.value > 0) or
-             (evt.action == "esc" and evt.value > 0) ):
+        if ((evt.action == "quit" and evt.value > 0)
+                or (evt.action == "esc" and evt.value > 0)):
             gym.destroy_viewer(viewer)
             gym.destroy_sim(sim)
             quit()

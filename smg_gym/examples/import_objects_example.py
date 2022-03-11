@@ -3,7 +3,6 @@ import numpy as np
 import random
 from isaacgym import gymutil
 from isaacgym import gymapi
-import inspect
 
 from pybullet_object_models import primitive_objects as object_set
 # from pybullet_object_models import random_objects as object_set
@@ -63,7 +62,7 @@ gym.subscribe_viewer_keyboard_event(viewer, gymapi.KEY_Q, "quit")
 
 # add ground plane
 plane_params = gymapi.PlaneParams()
-plane_params.normal = gymapi.Vec3(0, 0, 1) # z-up!
+plane_params.normal = gymapi.Vec3(0, 0, 1)  # z-up!
 plane_params.distance = 0
 plane_params.static_friction = 0.0
 plane_params.dynamic_friction = 0.0
@@ -83,6 +82,8 @@ envs = []
 actor_handles = []
 
 # create ball asset with gravity disabled from pybullet-object_models
+
+
 def load_object():
 
     model_list = object_set.getModelList()
@@ -100,6 +101,8 @@ def load_object():
     return asset_obj
 
 # add object actor
+
+
 def add_object_actor(env):
 
     pose = gymapi.Transform()
@@ -109,6 +112,7 @@ def add_object_actor(env):
     obj_handle = gym.create_actor(env, asset_obj, pose, "actor_obj_{}".format(i), -1, -1)
 
     actor_handles.append(obj_handle)
+
 
 # create env
 for i in range(num_envs):
