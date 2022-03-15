@@ -59,6 +59,8 @@ class BaseShadowModularGrasper(VecTask):
         self.randomize = self.cfg["task"]["randomize"]
         self.rand_hand_joints = self.cfg["task"]["randHandJoints"]
         self.rand_init_orn = self.cfg["task"]["randInitOrn"]
+        self.rand_pivot_pos = self.cfg["task"]["randPivotPos"]
+        self.rand_pivot_orn = self.cfg["task"]["randPivotOrn"]
 
         super().__init__(
             config=self.cfg,
@@ -108,13 +110,6 @@ class BaseShadowModularGrasper(VecTask):
 
         # refresh all tensors
         self.refresh_tensors()
-
-        # get fixed pose of hand
-        self.hand_base_pos = self.root_state_tensor[self.hand_indices, 0:3]
-        self.hand_base_orn = self.root_state_tensor[self.hand_indices, 3:7]
-
-        # initialize a pivot point to rotate the object around
-        self.pivot_point_positions = self.hand_base_pos + quat_axis(self.hand_base_orn, axis=2) * 0.25
 
     def create_sim(self):
 
@@ -240,9 +235,8 @@ class BaseShadowModularGrasper(VecTask):
         return obj_asset
 
     def _setup_pivot_point(self):
-        pivot_point_positions = torch.zeros(size=(self.num_envs, 1), device=self.device),
         pivot_point_geom = self._get_sphere_geom(color=(1, 1, 0))
-        return pivot_point_geom, pivot_point_positions
+        return pivot_point_geom
 
     def _setup_keypoints(self):
 
@@ -299,6 +293,15 @@ class BaseShadowModularGrasper(VecTask):
 
         return tcp_body_idxs
 
+    def _get_pivot_point_idxs(self, env, hand_actor_handle):
+
+        hand_body_names = self.gym.get_actor_rigid_body_names(env, hand_actor_handle)
+        body_names = [name for name in hand_body_names if 'pivot_point' in name]
+        body_idxs = [self.gym.find_actor_rigid_body_index(
+            env, hand_actor_handle, name, gymapi.DOMAIN_ENV) for name in body_names]
+
+        return body_idxs
+
     def _create_envs(self, num_envs, spacing, num_per_row):
         lower = gymapi.Vec3(-spacing, -spacing, 0.0)
         upper = gymapi.Vec3(spacing, spacing, spacing)
@@ -307,7 +310,7 @@ class BaseShadowModularGrasper(VecTask):
         self.hand_asset = self._setup_hand()
         self.obj_asset = self._setup_obj()
         self.obj_kp_geoms, self.obj_kp_positions = self._setup_keypoints()
-        self.pivot_point_geom, self.pivot_point_positions = self._setup_pivot_point()
+        self.pivot_point_geom = self._setup_pivot_point()
 
         # collect useful indeces and handles
         self.envs = []
@@ -354,6 +357,9 @@ class BaseShadowModularGrasper(VecTask):
         self.n_tips = 3
         self.obj_body_idx, self.tip_body_idxs = self._get_contact_idxs(env_ptr, obj_actor_handle, hand_actor_handle)
         self.fingertip_body_idxs = self._get_sensor_fingertip_idxs(env_ptr, hand_actor_handle)
+
+        # get indices of pivot points
+        self.pivot_point_body_idxs = self._get_pivot_point_idxs(env_ptr, hand_actor_handle)
 
         # convert states to tensors (TODO: make this more intuitive shape from start)
         self.init_obj_states = to_torch(
@@ -486,8 +492,6 @@ class BaseShadowModularGrasper(VecTask):
         Reward computed after observation so vars set in compute_obs can
         be used here
         """
-        # set point for which to rotate the object around.
-        self.pivot_point_pos = torch.zeros_like(self.obj_base_pos)
 
         # retrieve environment observations from buffer
         (
@@ -557,6 +561,9 @@ class BaseShadowModularGrasper(VecTask):
             )
             self.root_state_tensor[self.obj_indices[env_ids_for_reset], 3:7] = new_object_rot
 
+        # randomise axis of rotation
+        self.reset_target_axis(env_ids_for_reset)
+
         # set the root state tensor to reset objects
         reset_indices = torch.unique(torch.cat([self.obj_indices[env_ids_for_reset]]).to(torch.int32))
 
@@ -571,7 +578,7 @@ class BaseShadowModularGrasper(VecTask):
         self.progress_buf[env_ids_for_reset] = 0
         self.reset_buf[env_ids_for_reset] = 0
 
-    def reset_target_axis(self, env_ids, apply_reset=False):
+    def reset_target_axis(self, env_ids_for_reset):
         """
         Reset target axis of rotation
         """
@@ -660,12 +667,17 @@ class BaseShadowModularGrasper(VecTask):
 
                 # visualise pivot point
                 pose.p = gymapi.Vec3(
-                    self.pivot_point_positions[i, 0],
-                    self.pivot_point_positions[i, 1],
-                    self.pivot_point_positions[i, 2]
+                    self.pivot_point_pos[i, 0],
+                    self.pivot_point_pos[i, 1],
+                    self.pivot_point_pos[i, 2]
+                )
+                pose.r = gymapi.Quat(
+                    self.pivot_point_orn[i, 0],
+                    self.pivot_point_orn[i, 1],
+                    self.pivot_point_orn[i, 2],
+                    self.pivot_point_orn[i, 3]
                 )
 
-                pose.r = gymapi.Quat(0, 0, 0, 1)
                 gymutil.draw_lines(
                     self.pivot_point_geom,
                     self.gym,
@@ -719,7 +731,8 @@ def compute_manip_reward(
 
     # Check env termination conditions, including maximum success number
     resets = torch.zeros_like(reset_buf)
-    # resets = torch.where(dist_from_pivot >= fall_reset_dist, torch.ones_like(reset_buf), resets)
-    # resets = torch.where(progress_buf >= max_episode_length, torch.ones_like(resets), resets)
+    resets = torch.where(dist_from_pivot >= fall_reset_dist, torch.ones_like(reset_buf), resets)
+    resets = torch.where(progress_buf >= max_episode_length, torch.ones_like(resets), resets)
 
+    return reward, resets, progress_buf
     return reward, resets, progress_buf

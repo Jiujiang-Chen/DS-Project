@@ -329,7 +329,7 @@
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <sphere radius="0.005"/>
+        <sphere radius="0.001"/>
       </geometry>
        <material name="TransparentRed"/>
     </visual>
@@ -343,7 +343,7 @@
   <joint name="F1_tcp_joint" type="fixed">
     <parent link="SMG_F1_tactip_body"/>
     <child link="F1_tcp_link"/>
-    <origin rpy="0 0 0" xyz="0.0 -0.02 0.052"/>
+    <origin rpy="0 0 0" xyz="0.0 -0.02 0.0535"/>
   </joint>
 
 
@@ -536,7 +536,7 @@
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <sphere radius="0.005"/>
+        <sphere radius="0.001"/>
       </geometry>
        <material name="TransparentRed"/>
     </visual>
@@ -550,7 +550,7 @@
   <joint name="F2_tcp_joint" type="fixed">
     <parent link="SMG_F2_tactip_body"/>
     <child link="F2_tcp_link"/>
-    <origin rpy="0 0 0" xyz="0.0 -0.02 0.052"/>
+    <origin rpy="0 0 0" xyz="0.0 -0.02 0.0535"/>
   </joint>
 
   <!-- ============= Finger 3 =============== -->
@@ -745,7 +745,7 @@
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <sphere radius="0.005"/>
+        <sphere radius="0.001"/>
       </geometry>
        <material name="TransparentRed"/>
     </visual>
@@ -759,7 +759,31 @@
   <joint name="F3_tcp_joint" type="fixed">
     <parent link="SMG_F3_tactip_body"/>
     <child link="F3_tcp_link"/>
-    <origin rpy="0 0 0" xyz="0.0 -0.02 0.052"/>
+    <origin rpy="0 0 0" xyz="0.0 -0.02 0.0535"/>
   </joint>
+
+
+  <!-- Pivot Point -->
+  <link name="pivot_point_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <sphere radius="0.005"/>
+      </geometry>
+       <material name="Yellow"/>
+    </visual>
+    <inertial>
+      <mass value="0.0"/>
+      <origin rpy="0.0 0.0 0.0" xyz="0.0 0.0 0.0"/>
+      <inertia ixx="1.0" ixy="0.0" ixz="0.0" iyy="1.0" iyz="0.0" izz="1.0"/>
+    </inertial>
+  </link>
+
+  <joint name="pivot_point_joint" type="fixed">
+    <parent link="SMG_base_link"/>
+    <child link="pivot_point_link"/>
+    <origin rpy="0 0 0" xyz="0.0 0.0 0.25"/>
+  </joint>
+
 
 </robot>
