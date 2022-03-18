@@ -113,7 +113,8 @@ class BaseShadowModularGrasper(VecTask):
 
         # set the up axis to be z-up given that assets are y-up by default
         self.sim_params.up_axis = gymapi.UP_AXIS_Z
-        self.sim_params.gravity = gymapi.Vec3(0.0, 0.0, -9.81)
+        # self.sim_params.gravity = gymapi.Vec3(0.0, 0.0, -9.81)
+        self.sim_params.gravity = gymapi.Vec3(0.0, 0.0, -0.1)
 
         self.sim = super().create_sim(self.device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
         self._create_ground_plane()
@@ -247,7 +248,7 @@ class BaseShadowModularGrasper(VecTask):
 
         # set initial state for the object
         self.init_obj_pose = gymapi.Transform()
-        self.init_obj_pose.p = gymapi.Vec3(0.0, 0.0, 0.245)
+        self.init_obj_pose.p = gymapi.Vec3(0.0, 0.0, 0.345)
         self.init_obj_pose.r = gymapi.Quat(0, 0, 0, 1)
 
         self.init_obj_vel = gymapi.Velocity()

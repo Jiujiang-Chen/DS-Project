@@ -59,11 +59,11 @@ params:
     truncate_grads: True
     e_clip: 0.2
 
-    horizon_length: 1024
-    minibatch_size: 32
+    # horizon_length: 1024
+    # minibatch_size: 32
 
-    # horizon_length: 32
-    # minibatch_size: 32768
+    horizon_length: 32
+    minibatch_size: 32768
 
     mini_epochs: 8
     critic_coef: 4

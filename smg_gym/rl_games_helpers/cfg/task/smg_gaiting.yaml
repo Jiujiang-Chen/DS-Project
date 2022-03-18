@@ -5,9 +5,9 @@ physics_engine: ${..physics_engine}
 
 # if given, will override the device setting in gym.
 env:
-  numEnvs: 4
+  # numEnvs: 4
   # numEnvs: 1024
-  # numEnvs: 4096
+  numEnvs: 4096
   # numEnvs: 16384
 
   envSpacing: 0.5
@@ -35,10 +35,10 @@ env:
 
 task:
   randomize: True
-  randHandJoints: True
-  randInitOrn: False
-  randPivotPos: True
-  randPivotOrn: True
+  randHandJoints: False
+  randObjInitOrn: False
+  randPivotPos: False
+  randPivotAxel: False
 
 sim:
   dt: 0.01667 # 1/60
