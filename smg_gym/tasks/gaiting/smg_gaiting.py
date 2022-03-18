@@ -13,7 +13,6 @@ from isaacgym.torch_utils import to_torch
 from isaacgym.torch_utils import torch_rand_float
 from isaacgym.torch_utils import quat_rotate
 from isaacgym.torch_utils import quat_rotate_inverse
-from isaacgym.torch_utils import quat_conjugate
 
 from smg_gym.tasks.gaiting.base_hand_env import BaseShadowModularGrasper
 
@@ -43,7 +42,7 @@ class SMGGaiting(BaseShadowModularGrasper):
 
         total = 81
         """
-        cfg["env"]["numObservations"] = 70
+        cfg["env"]["numObservations"] = 76
         cfg["env"]["numActions"] = 9
 
         # what object to use
@@ -101,11 +100,6 @@ class SMGGaiting(BaseShadowModularGrasper):
         obj_base_orn = self.root_state_tensor[self.obj_indices, 3:7]
         self.pivot_axel_objframe[env_ids_for_reset] = quat_rotate_inverse(
             obj_base_orn[env_ids_for_reset], self.pivot_axel_worldframe[env_ids_for_reset, :])
-
-        print('')
-        print(self.pivot_axel_worldframe)
-        print(self.pivot_axel_workframe)
-        print(self.pivot_axel_objframe)
 
 
 @torch.jit.script
