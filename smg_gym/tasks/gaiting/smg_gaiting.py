@@ -70,41 +70,42 @@ class SMGGaiting(BaseShadowModularGrasper):
 
         # randomise position of pivot point
         if self.randomize and self.rand_pivot_pos:
-            pos_offset = torch_rand_float(
+            self.pivot_point_pos_offset[env_ids_for_reset, :] = torch_rand_float(
                 -0.025, 0.025,
                 (num_envs_to_reset, 3),
                 device=self.device
             )
         else:
-            pos_offset = to_torch([0.0, 0.0, 0.0], dtype=torch.float, device=self.device).repeat((num_envs_to_reset, 1))
+            self.pivot_point_pos_offset[env_ids_for_reset, :] = to_torch(
+                [0.0, 0.0, 0.0], dtype=torch.float, device=self.device).repeat((num_envs_to_reset, 1))
 
-        self.pivot_axel_p1[env_ids_for_reset, :] = pivot_point_pos + pos_offset
+        self.pivot_point_pos[env_ids_for_reset, :] = pivot_point_pos + self.pivot_point_pos_offset[env_ids_for_reset, :]
 
         # randomise direction of pivot axel
         if self.randomize and self.rand_pivot_axel:
-            pivot_unit_vec = torch_random_dir(
+            self.pivot_axel_workframe[env_ids_for_reset, :] = torch_random_dir(
                 num_envs_to_reset,
                 device=self.device
             )
         else:
-            pivot_unit_vec = to_torch(
+            self.pivot_axel_workframe[env_ids_for_reset, :] = to_torch(
                 [0.0, 0.0, 1.0],
                 dtype=torch.float,
                 device=self.device
             ).repeat((num_envs_to_reset, 1))
 
-        self.pivot_axel_dir[env_ids_for_reset, :] = quat_rotate(pivot_point_orn, pivot_unit_vec)
-
-        line_scale = 0.1
-        self.pivot_axel_p2[env_ids_for_reset, :] = self.pivot_axel_p1[env_ids_for_reset, :] + \
-            self.pivot_axel_dir[env_ids_for_reset, :] * line_scale
+        self.pivot_axel_worldframe[env_ids_for_reset, :] = quat_rotate(
+            pivot_point_orn, self.pivot_axel_workframe[env_ids_for_reset, :])
 
         # find the same pivot axel in the object frame
         obj_base_orn = self.root_state_tensor[self.obj_indices, 3:7]
-        # self.pivot_axel_dir_objframe[env_ids_for_reset] = quat_rotate_inverse(obj_base_orn[env_ids_for_reset], pivot_unit_vec)
-        self.pivot_axel_dir_objframe[env_ids_for_reset, :] = quat_rotate(
-            quat_conjugate(obj_base_orn[env_ids_for_reset]), pivot_unit_vec)
-        # print(self.pivot_axel_dir_objframe)
+        self.pivot_axel_objframe[env_ids_for_reset] = quat_rotate_inverse(
+            obj_base_orn[env_ids_for_reset], self.pivot_axel_worldframe[env_ids_for_reset, :])
+
+        print('')
+        print(self.pivot_axel_worldframe)
+        print(self.pivot_axel_workframe)
+        print(self.pivot_axel_objframe)
 
 
 @torch.jit.script

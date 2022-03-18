@@ -42,6 +42,9 @@
   <material name="TacTipWhite">
    <color rgba="0.8 0.8 0.8 1.0"/>
  </material>
+  <material name="TacTipBlack">
+   <color rgba="0.1 0.1 0.1 1.0"/>
+ </material>
  <material name="TransparentRed">
    <color rgba="0.9 0 0.2 0.5"/>
  </material>

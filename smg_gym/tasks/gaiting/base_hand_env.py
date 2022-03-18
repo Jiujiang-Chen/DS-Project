@@ -156,7 +156,7 @@ class BaseShadowModularGrasper(VecTask):
         if self.physics_engine == gymapi.SIM_PHYSX:
             asset_options.use_physx_armature = True
 
-        hand_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
+        self.hand_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
 
         self.control_joint_names = [
             "SMG_F1J1", "SMG_F1J2", "SMG_F1J3",
@@ -164,13 +164,13 @@ class BaseShadowModularGrasper(VecTask):
             "SMG_F3J1", "SMG_F3J2", "SMG_F3J3"
         ]
         self.control_joint_dof_indices = [self.gym.find_asset_dof_index(
-            hand_asset, name) for name in self.control_joint_names]
+            self.hand_asset, name) for name in self.control_joint_names]
         self.control_joint_dof_indices = to_torch(self.control_joint_dof_indices, dtype=torch.long, device=self.device)
 
         # get counts from hand asset
-        self.n_hand_bodies = self.gym.get_asset_rigid_body_count(hand_asset)
-        self.n_hand_shapes = self.gym.get_asset_rigid_shape_count(hand_asset)
-        self.n_hand_dofs = self.gym.get_asset_dof_count(hand_asset)
+        self.n_hand_bodies = self.gym.get_asset_rigid_body_count(self.hand_asset)
+        self.n_hand_shapes = self.gym.get_asset_rigid_shape_count(self.hand_asset)
+        self.n_hand_dofs = self.gym.get_asset_dof_count(self.hand_asset)
 
         # set initial joint state tensor (get updated on reset and step)
         self.prev_targets = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
@@ -204,7 +204,7 @@ class BaseShadowModularGrasper(VecTask):
             ] * 3))
 
         # get hand limits
-        hand_dof_props = self.gym.get_asset_dof_properties(hand_asset)
+        hand_dof_props = self.gym.get_asset_dof_properties(self.hand_asset)
 
         self.hand_dof_lower_limits = []
         self.hand_dof_upper_limits = []
@@ -215,8 +215,6 @@ class BaseShadowModularGrasper(VecTask):
 
         self.hand_dof_lower_limits = to_torch(self.hand_dof_lower_limits, device=self.device)
         self.hand_dof_upper_limits = to_torch(self.hand_dof_upper_limits, device=self.device)
-
-        return hand_asset
 
     def _setup_obj(self):
 
@@ -230,7 +228,7 @@ class BaseShadowModularGrasper(VecTask):
         asset_options.fix_base_link = False
         asset_options.override_com = True
         asset_options.override_inertia = True
-        obj_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
+        self.obj_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
 
         # set initial state for the object
         self.default_obj_pos = (0.0, 0.0, 0.4)
@@ -238,13 +236,35 @@ class BaseShadowModularGrasper(VecTask):
         self.default_obj_linvel = (0.0, 0.0, 0.0)
         self.default_obj_angvel = (0.0, 0.0, 0.0)
 
-        return obj_asset
+    def _setup_goal(self):
+        asset_root = object_set.getDataPath()
+        asset_file = os.path.join(self.obj_name, "model.urdf")
+        asset_options = gymapi.AssetOptions()
+        asset_options.disable_gravity = True
+        asset_options.fix_base_link = True
+        asset_options.override_com = True
+        asset_options.override_inertia = True
+        self.goal_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
+
+        # set initial state of goal
+        self.default_goal_pos = (-0.2, -0.06, 0.4)
+        self.default_goal_orn = (0.0, 0.0, 0.0, 1.0)
 
     def _setup_pivot_point(self):
-        self.pivot_axel_p1 = torch.zeros(size=(self.num_envs, 3), device=self.device)
-        self.pivot_axel_p2 = torch.zeros(size=(self.num_envs, 3), device=self.device)
-        self.pivot_axel_dir = torch.zeros(size=(self.num_envs, 3), device=self.device)
-        self.pivot_axel_dir_objframe = torch.zeros(size=(self.num_envs, 3), device=self.device)
+
+        # fixed vars
+        self.pivot_line_scale = 0.2
+        self.pivot_axel_p1 = to_torch(self.default_goal_pos, dtype=torch.float,
+                                      device=self.device).repeat((self.num_envs, 1))
+
+        # vars that change on reset (with randomisation)
+        self.pivot_point_pos_offset = torch.zeros(size=(self.num_envs, 3), device=self.device)
+        self.pivot_point_pos = torch.zeros(size=(self.num_envs, 3), device=self.device)
+
+        self.pivot_axel_worldframe = torch.zeros(size=(self.num_envs, 3), device=self.device)
+        self.pivot_axel_workframe = torch.zeros(size=(self.num_envs, 3), device=self.device)
+        self.pivot_axel_objframe = torch.zeros(size=(self.num_envs, 3), device=self.device)
+        self.current_obj_pivot_axel_worldframe = torch.zeros(size=(self.num_envs, 3), device=self.device)
 
     def _setup_keypoints(self):
 
@@ -320,8 +340,9 @@ class BaseShadowModularGrasper(VecTask):
         upper = gymapi.Vec3(spacing, spacing, spacing)
 
         # create assets and variables
-        self.hand_asset = self._setup_hand()
-        self.obj_asset = self._setup_obj()
+        self._setup_hand()
+        self._setup_obj()
+        self._setup_goal()
         self._setup_keypoints()
         self._setup_pivot_point()
 
@@ -345,6 +366,11 @@ class BaseShadowModularGrasper(VecTask):
             # setup obj
             obj_actor_handle = self._create_obj_actor(env_ptr, i)
             obj_idx = self.gym.get_actor_index(env_ptr, obj_actor_handle, gymapi.DOMAIN_SIM)
+
+            # TODO: Create a goal actor due to a bug that causes random behaviour on reset of multiple envs.
+            # where last object in buffer appear to initialise with random velocities,
+            # Having a fixed goal object absorbs this.
+            self._create_goal_actor(env_ptr, i)
 
             # append handles and indeces
             self.envs.append(env_ptr)
@@ -405,6 +431,13 @@ class BaseShadowModularGrasper(VecTask):
         obj_props[0].mass = 0.25
         self.gym.set_actor_rigid_body_properties(env_ptr, handle, obj_props)
 
+        return handle
+
+    def _create_goal_actor(self, env, idx):
+        init_goal_pose = gymapi.Transform()
+        init_goal_pose.p = gymapi.Vec3(*self.default_goal_pos)
+        init_goal_pose.r = gymapi.Quat(*self.default_goal_orn)
+        handle = self.gym.create_actor(env, self.goal_asset, init_goal_pose, "goal_actor_{}".format(idx), 0, 0)
         return handle
 
     def get_tip_contacts(self):
@@ -501,7 +534,7 @@ class BaseShadowModularGrasper(VecTask):
             self.progress_buf[:],
         ) = compute_manip_reward(
             self.obj_base_pos,
-            self.pivot_axel_p1,
+            self.pivot_point_pos,
             self.actions,
             self.n_tip_contacts,
             self.max_episode_length,
@@ -688,10 +721,12 @@ class BaseShadowModularGrasper(VecTask):
                 self.pivot_axel_p1[i, 1],
                 self.pivot_axel_p1[i, 2]
             )
+
+            pivot_axel_p2_worldframe = self.pivot_axel_p1 + self.pivot_axel_worldframe * self.pivot_line_scale
             pivot_p2 = gymapi.Vec3(
-                self.pivot_axel_p2[i, 0],
-                self.pivot_axel_p2[i, 1],
-                self.pivot_axel_p2[i, 2]
+                pivot_axel_p2_worldframe[i, 0],
+                pivot_axel_p2_worldframe[i, 1],
+                pivot_axel_p2_worldframe[i, 2]
             )
 
             gymutil.draw_line(
@@ -705,8 +740,8 @@ class BaseShadowModularGrasper(VecTask):
 
             # visualise object frame pivot_axel
             obj_base_orn = self.root_state_tensor[self.obj_indices, 3:7]
-            pivot_axel_dir_worldframe = quat_rotate(obj_base_orn, self.pivot_axel_dir_objframe)
-            pivot_axel_p2_objframe = self.pivot_axel_p1 + pivot_axel_dir_worldframe * 0.25
+            self.current_obj_pivot_axel_worldframe = quat_rotate(obj_base_orn, self.pivot_axel_objframe)
+            pivot_axel_p2_objframe = self.pivot_axel_p1 + self.current_obj_pivot_axel_worldframe * self.pivot_line_scale
 
             pivot_p2_objframe = gymapi.Vec3(
                 pivot_axel_p2_objframe[i, 0],
