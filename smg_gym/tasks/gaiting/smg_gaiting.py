@@ -2,6 +2,9 @@
 Train:
 python train.py task=smg_gaiting headless=True
 
+# train low env num
+python train.py task=smg_gaiting task.env.numEnvs=8 headless=False
+
 Test:
 python train.py task=smg_gaiting task.env.numEnvs=8 test=True headless=False checkpoint=runs/smg_gaiting/nn/smg_gaiting.pth
 """

@@ -62,10 +62,10 @@ params:
     # horizon_length: 1024
     # minibatch_size: 32
 
-    horizon_length: 32
-    minibatch_size: 32768
+    horizon_length: 8
+    minibatch_size: 8192
 
-    mini_epochs: 8
+    mini_epochs: 5
     critic_coef: 4
     clip_value: True
     seq_len: 4
