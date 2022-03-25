@@ -10,19 +10,27 @@ from isaacgym.torch_utils import unscale
 from isaacgym.torch_utils import torch_rand_float
 from isaacgym.torch_utils import tensor_clamp
 from isaacgym.torch_utils import scale
-from isaacgymenvs.tasks.base.vec_task import VecTask
+from isaacgym.torch_utils import quat_rotate
+from isaacgym.torch_utils import copysign
+from isaacgym.torch_utils import quat_conjugate
+from isaacgym.torch_utils import quat_mul
+from isaacgym.torch_utils import quat_from_angle_axis
 from isaacgym import gymtorch
 from isaacgym import gymapi
 from isaacgym import gymutil
 
+from isaacgymenvs.tasks.base.vec_task import VecTask
+
 from pybullet_object_models import primitive_objects as object_set
 
 from smg_gym.rl_games_helpers.utils.torch_jit_utils import randomize_rotation
-from isaacgym.torch_utils import quat_rotate
 from smg_gym.assets import add_assets_path
 
 
 class BaseShadowModularGrasper(VecTask):
+
+    _state_history_len = 2
+    _object_state_history: Deque[torch.Tensor] = deque(maxlen=_state_history_len)
 
     def __init__(
         self,
@@ -107,8 +115,18 @@ class BaseShadowModularGrasper(VecTask):
         self.y_unit_tensor = to_torch([0, 1, 0], dtype=torch.float, device=self.device).repeat((self.num_envs, 1))
         self.z_unit_tensor = to_torch([0, 0, 1], dtype=torch.float, device=self.device).repeat((self.num_envs, 1))
 
+        self.angvel_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
+        curr_history_length = 0
+        while curr_history_length < self._state_history_len:
+            self._object_state_history.append(self.root_state_tensor[self.obj_indices])
+            curr_history_length += 1
+
         # refresh all tensors
         self.refresh_tensors()
+
+        # init goal pose
+        self.goal_base_pos = self.root_state_tensor[self.goal_indices, 0:3]
+        self.goal_base_orn = self.root_state_tensor[self.goal_indices, 3:7]
 
     def create_sim(self):
 
@@ -139,9 +157,11 @@ class BaseShadowModularGrasper(VecTask):
         asset_options.override_inertia = True
         asset_options.collapse_fixed_joints = False
         asset_options.armature = 0.00001
-        asset_options.thickness = 0.001
-        asset_options.mesh_normal_mode = gymapi.COMPUTE_PER_VERTEX
+        asset_options.thickness = 0.0
+        # asset_options.mesh_normal_mode = gymapi.COMPUTE_PER_VERTEX
         asset_options.default_dof_drive_mode = int(gymapi.DOF_MODE_POS)
+        # asset_options.default_dof_drive_mode = int(gymapi.DOF_MODE_VEL)
+        # asset_options.default_dof_drive_mode = int(gymapi.DOF_MODE_EFFORT)
         asset_options.convex_decomposition_from_submeshes = False
         asset_options.flip_visual_attachments = False
 
@@ -182,26 +202,26 @@ class BaseShadowModularGrasper(VecTask):
         if self.randomize and self.rand_hand_joints:
             self.init_joint_mins = to_torch(np.array([
                 -20.0*(np.pi/180),
-                7.5*(np.pi/180),
+                10*(np.pi/180),
                 -10.0*(np.pi/180),
             ] * 3))
 
             self.init_joint_maxs = to_torch(np.array([
                 20.0*(np.pi/180),
-                7.5*(np.pi/180),
+                10*(np.pi/180),
                 -10.0*(np.pi/180),
             ] * 3))
 
         else:
             self.init_joint_mins = to_torch(np.array([
                 0.0*(np.pi/180),
-                7.5*(np.pi/180),
+                10*(np.pi/180),
                 -10.0*(np.pi/180),
             ] * 3))
 
             self.init_joint_maxs = to_torch(np.array([
                 0.0*(np.pi/180),
-                7.5*(np.pi/180),
+                10*(np.pi/180),
                 -10.0*(np.pi/180),
             ] * 3))
 
@@ -232,13 +252,19 @@ class BaseShadowModularGrasper(VecTask):
         asset_options.override_inertia = False
         asset_options.angular_damping = 0.0
         asset_options.linear_damping = 0.0
+        asset_options.max_linear_velocity = 10.0
+        asset_options.max_angular_velocity = 5.0
+        asset_options.thickness = 0.0
+        asset_options.convex_decomposition_from_submeshes = True
+        asset_options.flip_visual_attachments = False
+        asset_options.vhacd_enabled = False
         self.obj_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
 
         # set object properties
         # Ref: https://github.com/rr-learning/rrc_simulation/blob/master/python/rrc_simulation/collision_objects.py#L96
         obj_props = self.gym.get_asset_rigid_shape_properties(self.obj_asset)
         for p in obj_props:
-            p.friction = 1.0
+            p.friction = 2.0
             p.torsion_friction = 0.001
             p.rolling_friction = 0.0
             p.restitution = 0.0
@@ -246,10 +272,11 @@ class BaseShadowModularGrasper(VecTask):
         self.gym.set_asset_rigid_shape_properties(self.obj_asset, obj_props)
 
         # set initial state for the object
-        self.default_obj_pos = (0.0, 0.0, 0.25)
+        self.default_obj_pos = (0.0, 0.0, 0.26)
         self.default_obj_orn = (0.0, 0.0, 0.0, 1.0)
         self.default_obj_linvel = (0.0, 0.0, 0.0)
         self.default_obj_angvel = (0.0, 0.0, 0.1)
+        self.obj_displacement_tensor = to_torch(self.default_obj_pos, dtype=torch.float, device=self.device)
 
     def _setup_goal(self):
         asset_root = object_set.getDataPath()
@@ -264,6 +291,7 @@ class BaseShadowModularGrasper(VecTask):
         # set initial state of goal
         self.default_goal_pos = (-0.2, -0.06, 0.4)
         self.default_goal_orn = (0.0, 0.0, 0.0, 1.0)
+        self.goal_displacement_tensor = to_torch(self.default_goal_pos, dtype=torch.float, device=self.device)
 
     def _setup_pivot_point(self):
 
@@ -287,7 +315,9 @@ class BaseShadowModularGrasper(VecTask):
         self.n_keypoints = 6
 
         self.obj_kp_positions = torch.zeros(size=(self.num_envs, self.n_keypoints, 3), device=self.device)
-        self.obj_kp_basis_vecs = torch.tensor([
+        self.goal_kp_positions = torch.zeros(size=(self.num_envs, self.n_keypoints, 3), device=self.device)
+
+        self.kp_basis_vecs = torch.tensor([
             [1.0, 0.0, 0.0],
             [0.0, 1.0, 0.0],
             [0.0, 0.0, 1.0],
@@ -296,13 +326,13 @@ class BaseShadowModularGrasper(VecTask):
             [0.0, 0.0, -1.0],
         ], device=self.device)
 
-        self.obj_kp_geoms = []
-        self.obj_kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(1, 0, 0)))
-        self.obj_kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(0, 1, 0)))
-        self.obj_kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(0, 0, 1)))
-        self.obj_kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(1, 1, 0)))
-        self.obj_kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(0, 1, 1)))
-        self.obj_kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(1, 0, 1)))
+        self.kp_geoms = []
+        self.kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(1, 0, 0)))
+        self.kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(0, 1, 0)))
+        self.kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(0, 0, 1)))
+        self.kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(1, 1, 0)))
+        self.kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(0, 1, 1)))
+        self.kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(1, 0, 1)))
 
     def _get_sphere_geom(self, rad=0.01, color=(1, 0, 0)):
 
@@ -367,6 +397,7 @@ class BaseShadowModularGrasper(VecTask):
         self.hand_indices = []
         self.obj_actor_handles = []
         self.obj_indices = []
+        self.goal_indices = []
 
         for i in range(self.num_envs):
             # create env instance
@@ -385,7 +416,8 @@ class BaseShadowModularGrasper(VecTask):
             # TODO: Create a goal actor due to a bug that causes random behaviour on reset of multiple envs.
             # where last object in buffer appear to initialise with random velocities,
             # Having a fixed goal object absorbs this.
-            self._create_goal_actor(env_ptr, i)
+            goal_actor_handle = self._create_goal_actor(env_ptr, i)
+            goal_idx = self.gym.get_actor_index(env_ptr, goal_actor_handle, gymapi.DOMAIN_SIM)
 
             # append handles and indeces
             self.envs.append(env_ptr)
@@ -393,10 +425,12 @@ class BaseShadowModularGrasper(VecTask):
             self.hand_indices.append(hand_idx)
             self.obj_actor_handles.append(obj_actor_handle)
             self.obj_indices.append(obj_idx)
+            self.goal_indices.append(goal_idx)
 
         # convert indices to tensors
         self.hand_indices = to_torch(self.hand_indices, dtype=torch.long, device=self.device)
         self.obj_indices = to_torch(self.obj_indices, dtype=torch.long, device=self.device)
+        self.goal_indices = to_torch(self.goal_indices, dtype=torch.long, device=self.device)
 
         # get indices useful for contacts
         self.n_tips = 3
@@ -493,7 +527,9 @@ class BaseShadowModularGrasper(VecTask):
         # update the current keypoint positions
         for i in range(self.n_keypoints):
             self.obj_kp_positions[:, i, :] = self.obj_base_pos + \
-                quat_rotate(self.obj_base_orn, self.obj_kp_basis_vecs[i].repeat(self.num_envs, 1) * self.kp_dist)
+                quat_rotate(self.obj_base_orn, self.kp_basis_vecs[i].repeat(self.num_envs, 1) * self.kp_dist)
+            self.goal_kp_positions[:, i, :] = self.goal_base_pos + \
+                quat_rotate(self.goal_base_orn, self.kp_basis_vecs[i].repeat(self.num_envs, 1) * self.kp_dist)
 
     def compute_observations(self):
 
@@ -517,6 +553,9 @@ class BaseShadowModularGrasper(VecTask):
         self.obj_base_linvel = self.root_state_tensor[self.obj_indices, 7:10]
         self.obj_base_angvel = self.root_state_tensor[self.obj_indices, 10:13]
 
+        # append histories
+        self._object_state_history.appendleft(self.root_state_tensor[self.obj_indices])
+
         # get keypoint positions
         self.update_obj_keypoints()
 
@@ -524,11 +563,7 @@ class BaseShadowModularGrasper(VecTask):
         self.current_obj_pivot_axel_worldframe = quat_rotate(self.obj_base_orn, self.pivot_axel_objframe)
 
         # obs_buf shape=(num_envs, num_obs)
-        self.obs_buf[:, :9] = unscale(
-            self.hand_joint_pos,
-            self.hand_dof_lower_limits,
-            self.hand_dof_upper_limits
-        )
+        self.obs_buf[:, :9] = unscale(self.hand_joint_pos, self.hand_dof_lower_limits, self.hand_dof_upper_limits)
         self.obs_buf[:, 9:18] = self.hand_joint_vel
         self.obs_buf[:, 18:21] = self.obj_base_pos
         self.obs_buf[:, 21:25] = self.obj_base_orn
@@ -537,10 +572,15 @@ class BaseShadowModularGrasper(VecTask):
         self.obs_buf[:, 31:40] = self.actions
         self.obs_buf[:, 40:43] = self.tip_contacts
         self.obs_buf[:, 43:52] = self.fingertip_pos
-        self.obs_buf[:, 52:70] = self.obj_kp_positions.reshape(self.num_envs, self.n_keypoints*3)
-        self.obs_buf[:, 70:73] = self.pivot_axel_workframe
-        self.obs_buf[:, 73:76] = self.pivot_point_pos_offset
-
+        self.obs_buf[:, 52:55] = self.goal_base_pos
+        self.obs_buf[:, 55:59] = self.goal_base_orn
+        self.obs_buf[:, 59:63] = quat_mul(self.obj_base_orn, quat_conjugate(self.goal_base_orn))
+        self.obs_buf[:, 63:66] = self.pivot_axel_workframe
+        self.obs_buf[:, 66:69] = self.pivot_point_pos_offset
+        self.obs_buf[:, 69:87] = (self.obj_kp_positions
+                                  - self.obj_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
+        self.obs_buf[:, 87:105] = (self.obj_kp_positions
+                                   - self.obj_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
         return self.obs_buf
 
     def reset_hand(self, env_ids_for_reset):
@@ -615,15 +655,26 @@ class BaseShadowModularGrasper(VecTask):
         """
         pass
 
+    def reset_goal_pose(self, env_ids_for_reset):
+
+        # rotate goal pose
+        rotate_interval = torch.ones(size=(self.num_envs, ), device=self.device) * 45 * np.pi / 180
+        rotate_quat = quat_from_angle_axis(rotate_interval, self.pivot_axel_worldframe)
+
+        # get goal pose / vel
+        self.goal_base_orn = quat_mul(self.goal_base_orn, rotate_quat)
+
     def reset_idx(self, env_ids_for_reset):
 
         self.reset_hand(env_ids_for_reset)
         self.reset_object(env_ids_for_reset)
         self.reset_target_axis(env_ids_for_reset)
+        self.reset_goal_pose(env_ids_for_reset)
 
         # reset buffers
         self.progress_buf[env_ids_for_reset] = 0
         self.reset_buf[env_ids_for_reset] = 0
+        self.angvel_buf[env_ids_for_reset] = 0
 
     def pre_physics_step(self, actions):
 
@@ -687,10 +738,10 @@ class BaseShadowModularGrasper(VecTask):
 
         for i in range(self.num_envs):
 
-            # visualise keypoints
             for j in range(self.n_keypoints):
                 pose = gymapi.Transform()
 
+                # visualise object keypoints
                 pose.p = gymapi.Vec3(
                     self.obj_kp_positions[i, j, 0],
                     self.obj_kp_positions[i, j, 1],
@@ -700,7 +751,22 @@ class BaseShadowModularGrasper(VecTask):
                 pose.r = gymapi.Quat(0, 0, 0, 1)
 
                 gymutil.draw_lines(
-                    self.obj_kp_geoms[j],
+                    self.kp_geoms[j],
+                    self.gym,
+                    self.viewer,
+                    self.envs[i],
+                    pose
+                )
+
+                # visualise goal keypoints
+                pose.p = gymapi.Vec3(
+                    self.goal_kp_positions[i, j, 0],
+                    self.goal_kp_positions[i, j, 1],
+                    self.goal_kp_positions[i, j, 2]
+                )
+
+                gymutil.draw_lines(
+                    self.kp_geoms[j],
                     self.gym,
                     self.viewer,
                     self.envs[i],
@@ -757,29 +823,19 @@ class BaseShadowModularGrasper(VecTask):
         self.reset_buf[:] = 0.
 
         # retrieve environment observations from buffer
-        self.rew_buf[:], self.reset_buf[:], log_dict = compute_manip_reward_conditional(
-            self.obj_base_pos,
-            self.pivot_point_pos,
-            self.pivot_axel_worldframe,
-            self.current_obj_pivot_axel_worldframe,
-            self.obj_base_angvel,
+        self.rew_buf[:], self.reset_buf[:], log_dict = compute_manip_reward_keypoints(
+            self.obj_kp_positions - self.obj_displacement_tensor,
+            self.goal_kp_positions - self.goal_displacement_tensor,
             self.actions,
             self.max_episode_length,
             self.fall_reset_dist,
             self.n_tip_contacts,
-            self.require_contact,
-            self.pos_reward_scale,
-            self.orn_reward_scale,
-            self.vel_reward_scale,
-            self.contact_reward_scale,
-            self.action_penalty_scale,
-            self.fall_penalty_scale,
             self.rew_buf,
             self.reset_buf,
-            self.progress_buf
+            self.progress_buf,
         )
 
-        self.extras.update({"env/rewards/"+k: v.mean() for k, v in log_dict.items()})
+        self.extras.update({"env/metrics/"+k: v.mean() for k, v in log_dict.items()})
 
 
 @torch.jit.script
@@ -801,138 +857,40 @@ def lgsk_kernel(x: torch.Tensor, scale: float = 50.0, eps: float = 2) -> torch.T
 
 
 @torch.jit.script
-def compute_manip_reward_conditional(
-                obj_base_pos: torch.Tensor,
-                pivot_point_pos: torch.Tensor,
-                target_pivot_axel: torch.Tensor,
-                current_pivot_axel: torch.Tensor,
-                object_angvel: torch.Tensor,
+def compute_manip_reward_keypoints(
+                obj_kps: torch.Tensor,
+                goal_kps: torch.Tensor,
                 actions: torch.Tensor,
                 max_episode_length: float,
                 fall_reset_dist: float,
                 n_tip_contacts: torch.Tensor,
-                require_contact: bool,
-                pos_reward_scale: float,
-                orn_reward_scale: float,
-                vel_reward_scale: float,
-                contact_reward_scale: float,
-                action_penalty_scale: float,
-                fall_penalty_scale: float,
-                rew_buf: torch.Tensor,
-                reset_buf: torch.Tensor,
-                progress_buf: torch.Tensor,
-        ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
-
-    angle_lim = 0.5
-    n_contact_lim = 2
-    r_min, r_max = 0.0, 0.5
-
-    # Distance from the pivot point to the object base
-    dist_from_pivot = torch.norm(obj_base_pos - pivot_point_pos, p=2, dim=-1)
-
-    # Calculate orientation distance from starting orientation.
-    axel_cos_sim = torch.nn.functional.cosine_similarity(target_pivot_axel, current_pivot_axel, dim=1, eps=1e-12)
-    axel_cos_dist = torch.ones_like(axel_cos_sim) - axel_cos_sim
-
-    # Angular velocity reward
-    obj_angvel_about_axis = torch.sum(object_angvel * current_pivot_axel, dim=1)
-
-    # add penalty for large actions
-    action_penalty = torch.sum(actions ** 2, dim=-1) * -action_penalty_scale
-
-    # apply reward conditionals
-    total_reward = torch.clamp(obj_angvel_about_axis, min=r_min, max=r_max)
-    total_reward = torch.where(n_tip_contacts < n_contact_lim, torch.zeros_like(rew_buf), total_reward)
-    total_reward = torch.where(axel_cos_dist > angle_lim, torch.zeros_like(rew_buf), total_reward)
-
-    # Fall penalty: distance to the goal is larger than a threashold
-    total_reward = torch.where(dist_from_pivot >= fall_reset_dist, total_reward + fall_penalty_scale, total_reward)
-
-    # Check env termination conditions, including maximum success number
-    resets = torch.zeros_like(reset_buf)
-    resets = torch.where(dist_from_pivot >= fall_reset_dist, torch.ones_like(reset_buf), resets)
-    resets = torch.where(progress_buf >= max_episode_length, torch.ones_like(resets), resets)
-
-    info: Dict[str, torch.Tensor] = {
-        'position_rew': dist_from_pivot,
-        'axel_orientation_rew': axel_cos_dist,
-        'angvel_rew': obj_angvel_about_axis,
-        'action_penalty': action_penalty,
-        'total_reward': total_reward,
-    }
-
-    return total_reward, resets, info
-
-
-@torch.jit.script
-def compute_manip_reward_dense(
-                obj_base_pos: torch.Tensor,
-                pivot_point_pos: torch.Tensor,
-                target_pivot_axel: torch.Tensor,
-                current_pivot_axel: torch.Tensor,
-                object_angvel: torch.Tensor,
-                actions: torch.Tensor,
-                max_episode_length: float,
-                fall_reset_dist: float,
-                n_tip_contacts: torch.Tensor,
-                require_contact: bool,
-                pos_reward_scale: float,
-                orn_reward_scale: float,
-                vel_reward_scale: float,
-                contact_reward_scale: float,
-                action_penalty_scale: float,
-                fall_penalty_scale: float,
                 rew_buf: torch.Tensor,
                 reset_buf: torch.Tensor,
                 progress_buf: torch.Tensor,
         ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
 
     # Distance from the pivot point to the object base
-    dist_from_pivot = torch.norm(obj_base_pos - pivot_point_pos, p=2, dim=-1)
-
-    # Calculate orientation distance from starting orientation.
-    axel_cos_sim = torch.nn.functional.cosine_similarity(target_pivot_axel, current_pivot_axel, dim=1, eps=1e-12)
-    axel_cos_dist = torch.ones_like(axel_cos_sim) - axel_cos_sim
-
-    # Angular velocity reward
-    obj_angvel_about_axis = torch.sum(object_angvel * current_pivot_axel, dim=1)
+    kp_deltas = torch.norm(obj_kps - goal_kps, p=2, dim=-1)
 
     # bound and scale rewards such that they are in similar ranges
-    pos_dist_rew = lgsk_kernel(dist_from_pivot, scale=30., eps=2.) * pos_reward_scale
-    axel_dist_rew = lgsk_kernel(axel_cos_dist, scale=30., eps=2.) * orn_reward_scale
-    angvel_rew = torch.clamp(obj_angvel_about_axis, min=-1.0, max=1.0) * vel_reward_scale
-    # angvel_rew = torch.nn.functional.threshold(obj_angvel_about_axis, 1.0, -1.0)
-    # angvel_rew = torch.where(obj_angvel_about_axis < 0.8, torch.zeros_like(
-    #     obj_angvel_about_axis), torch.ones_like(obj_angvel_about_axis))
-    # print(angvel_rew)
-
-    # add reward for maintaining tips in contact
-    contact_rew = n_tip_contacts * contact_reward_scale
-
-    # add penalty for large actions
-    action_penalty = torch.sum(actions ** 2, dim=-1) * -action_penalty_scale
+    kp_dist_rew = lgsk_kernel(kp_deltas, scale=50., eps=2.).mean(dim=-1) * 40.0
 
     # Total reward is: position distance + orientation alignment + action regularization + success bonus + fall penalty
-    total_reward = pos_dist_rew + axel_dist_rew + angvel_rew + contact_rew + action_penalty
+    total_reward = kp_dist_rew
 
     # zero reward when less than 2 tips in contact
-    if require_contact:
-        total_reward = torch.where(n_tip_contacts < 2, torch.zeros_like(rew_buf), total_reward)
+    # total_reward = torch.where(n_tip_contacts < n_contact_lim, torch.zeros_like(rew_buf), total_reward)
 
     # Fall penalty: distance to the goal is larger than a threashold
-    total_reward = torch.where(dist_from_pivot >= fall_reset_dist, total_reward + fall_penalty_scale, total_reward)
+    # total_reward = torch.where(dist_from_pivot >= fall_reset_dist, total_reward + fall_penalty_scale, total_reward)
 
     # Check env termination conditions, including maximum success number
     resets = torch.zeros_like(reset_buf)
-    resets = torch.where(dist_from_pivot >= fall_reset_dist, torch.ones_like(reset_buf), resets)
+    # resets = torch.where(dist_from_pivot >= fall_reset_dist, torch.ones_like(reset_buf), resets)
     resets = torch.where(progress_buf >= max_episode_length, torch.ones_like(resets), resets)
 
     info: Dict[str, torch.Tensor] = {
-        'position_rew': pos_dist_rew,
-        'axel_orientation_rew': axel_dist_rew,
-        'angvel_rew': angvel_rew,
-        'contact_rew': contact_rew,
-        'action_penalty': action_penalty,
+        'num_tip_contacts': n_tip_contacts,
         'total_reward': total_reward,
     }
 

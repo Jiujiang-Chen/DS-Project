@@ -45,7 +45,7 @@ class SMGGaiting(BaseShadowModularGrasper):
 
         total = 81
         """
-        cfg["env"]["numObservations"] = 76
+        cfg["env"]["numObservations"] = 105
         cfg["env"]["numActions"] = 9
 
         # what object to use

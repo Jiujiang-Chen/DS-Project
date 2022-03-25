@@ -7,8 +7,8 @@ physics_engine: ${..physics_engine}
 env:
   # numEnvs: 4
   # numEnvs: 1024
-  numEnvs: 4096
-  # numEnvs: 8192
+  # numEnvs: 4096
+  numEnvs: 8192
   # numEnvs: 16384
 
   envSpacing: 0.5
@@ -16,7 +16,7 @@ env:
 
   # action settings
   useRelativeControl: True
-  dofSpeedScale: 5.0
+  dofSpeedScale: 10.0
   actionsMovingAverage: 1.0
   controlFrequencyInv: 1
 
@@ -25,36 +25,36 @@ env:
   fallResetDist: 0.15
   requireContact: False
   posRewardScale: 4.0
-  ornRewardScale: 4.0
-  velRewardScale: 1.0
+  ornRewardScale: 1.0
+  velRewardScale: 8.0
   contactRewardScale: 0.0
   actionPenaltyScale: 0.0
   fallPenaltyScale: 0.0
 
 task:
   randomize: True
-  randHandJoints: False
+  randHandJoints: True
   randObjInitOrn: False
   randPivotPos: False
-  randPivotAxel: False
+  randPivotAxel: True
 
 sim:
-  dt: 0.0167 # 1/60
-  substeps: 2
+  dt: 0.02
+  substeps: 4
   up_axis: "z"
   use_gpu_pipeline: ${eq:${...pipeline},"gpu"}
-  # gravity: [0.0, 0.0, -9.81]
-  gravity: [0.0, 0.0, -0.1]
+  gravity: [0.0, 0.0, -9.81]
+  # gravity: [0.0, 0.0, -0.1]
   physx:
     num_threads: ${....num_threads}
     solver_type: ${....solver_type}
     use_gpu: ${contains:"cuda",${....sim_device}}
     num_position_iterations: 8
-    num_velocity_iterations: 1
+    num_velocity_iterations: 0
     max_gpu_contact_pairs: 8388608
     contact_offset: 0.002
     rest_offset: 0.0
     bounce_threshold_velocity: 0.2
     max_depenetration_velocity: 1000.0
     default_buffer_size_multiplier: 5.0
-    contact_collection: 0
+    contact_collection: 2
