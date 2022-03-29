@@ -11,7 +11,7 @@ import torch
 from isaacgym import gymtorch
 from isaacgym.torch_utils import torch_rand_float
 
-from smg_gym.rl_games_helpers.utils.torch_jit_utils import randomize_rotation
+from smg_gym.utils.torch_jit_utils import randomize_rotation
 from smg_gym.tasks.reorient.base_hand_env import BaseShadowModularGrasper
 
 
@@ -40,7 +40,7 @@ class SMGManip(BaseShadowModularGrasper):
 
         total = 81
         """
-        cfg["env"]["numObservations"] = 81
+        cfg["env"]["numObservations"] = 99
         cfg["env"]["numActions"] = 9
 
         # what object to use
@@ -63,24 +63,21 @@ class SMGManip(BaseShadowModularGrasper):
         )
 
         # full rand
-        new_goal_rot = randomize_rotation(
+        new_goal_quat = randomize_rotation(
             rand_floats[:, 0],
             rand_floats[:, 1],
             self.x_unit_tensor[env_ids],
             self.y_unit_tensor[env_ids]
         )
 
-        self.root_state_tensor[
-            self.goal_indices[env_ids]
-        ] = self.init_goal_states[env_ids].clone()
-        self.root_state_tensor[self.goal_indices[env_ids], 3:7] = new_goal_rot
+        self.root_state_tensor[self.goal_indices[env_ids], 3:7] = new_goal_quat
 
         if apply_reset:
-            goal_object_indices = self.goal_indices[env_ids].to(torch.int32)
+            reset_goal_indices = self.goal_indices[env_ids].to(torch.int32)
             self.gym.set_actor_root_state_tensor_indexed(
                 self.sim,
                 gymtorch.unwrap_tensor(self.root_state_tensor),
-                gymtorch.unwrap_tensor(goal_object_indices),
+                gymtorch.unwrap_tensor(reset_goal_indices),
                 len(env_ids)
             )
 

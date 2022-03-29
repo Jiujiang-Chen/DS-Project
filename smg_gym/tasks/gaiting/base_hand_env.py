@@ -3,7 +3,6 @@ from collections import deque
 import numpy as np
 import os
 import torch
-from torch import Tensor
 
 from isaacgym.torch_utils import to_torch
 from isaacgym.torch_utils import unscale
@@ -11,7 +10,6 @@ from isaacgym.torch_utils import torch_rand_float
 from isaacgym.torch_utils import tensor_clamp
 from isaacgym.torch_utils import scale
 from isaacgym.torch_utils import quat_rotate
-from isaacgym.torch_utils import copysign
 from isaacgym.torch_utils import quat_conjugate
 from isaacgym.torch_utils import quat_mul
 from isaacgym.torch_utils import quat_from_angle_axis
@@ -23,7 +21,9 @@ from isaacgymenvs.tasks.base.vec_task import VecTask
 
 from pybullet_object_models import primitive_objects as object_set
 
-from smg_gym.rl_games_helpers.utils.torch_jit_utils import randomize_rotation
+from smg_gym.utils.torch_jit_utils import randomize_rotation
+from smg_gym.utils.torch_jit_utils import lgsk_kernel
+from smg_gym.utils.draw_utils import get_sphere_geom
 from smg_gym.assets import add_assets_path
 
 
@@ -242,9 +242,6 @@ class BaseShadowModularGrasper(VecTask):
 
         asset_root = object_set.getDataPath()
         asset_file = os.path.join(self.obj_name, "model.urdf")
-        # asset_root = '/home/alex/Documents/repos/isaacgym_v3/IsaacGymEnvs/assets'
-        # asset_file = os.path.join(
-        #     "urdf/objects/cube_multicolor.urdf")
         asset_options = gymapi.AssetOptions()
         asset_options.disable_gravity = False
         asset_options.fix_base_link = False
@@ -327,28 +324,12 @@ class BaseShadowModularGrasper(VecTask):
         ], device=self.device)
 
         self.kp_geoms = []
-        self.kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(1, 0, 0)))
-        self.kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(0, 1, 0)))
-        self.kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(0, 0, 1)))
-        self.kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(1, 1, 0)))
-        self.kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(0, 1, 1)))
-        self.kp_geoms.append(self._get_sphere_geom(rad=0.005, color=(1, 0, 1)))
-
-    def _get_sphere_geom(self, rad=0.01, color=(1, 0, 0)):
-
-        sphere_pose = gymapi.Transform(
-            p=gymapi.Vec3(0.0, 0.0, 0.0),
-            r=gymapi.Quat(0, 0, 0, 1)
-        )
-
-        sphere_geom = gymutil.WireframeSphereGeometry(
-            rad,  # rad
-            12,  # n_lat
-            12,  # n_lon
-            sphere_pose,
-            color=color
-        )
-        return sphere_geom
+        self.kp_geoms.append(get_sphere_geom(rad=0.005, color=(1, 0, 0)))
+        self.kp_geoms.append(get_sphere_geom(rad=0.005, color=(0, 1, 0)))
+        self.kp_geoms.append(get_sphere_geom(rad=0.005, color=(0, 0, 1)))
+        self.kp_geoms.append(get_sphere_geom(rad=0.005, color=(1, 1, 0)))
+        self.kp_geoms.append(get_sphere_geom(rad=0.005, color=(0, 1, 1)))
+        self.kp_geoms.append(get_sphere_geom(rad=0.005, color=(1, 0, 1)))
 
     def _get_contact_idxs(self, env, obj_actor_handle, hand_actor_handle):
 
@@ -387,8 +368,8 @@ class BaseShadowModularGrasper(VecTask):
         # create assets and variables
         self._setup_hand()
         self._setup_obj()
-        self._setup_goal()
         self._setup_keypoints()
+        self._setup_goal()
         self._setup_pivot_point()
 
         # collect useful indeces and handles
@@ -397,6 +378,7 @@ class BaseShadowModularGrasper(VecTask):
         self.hand_indices = []
         self.obj_actor_handles = []
         self.obj_indices = []
+        self.goal_actor_handles = []
         self.goal_indices = []
 
         for i in range(self.num_envs):
@@ -425,6 +407,7 @@ class BaseShadowModularGrasper(VecTask):
             self.hand_indices.append(hand_idx)
             self.obj_actor_handles.append(obj_actor_handle)
             self.obj_indices.append(obj_idx)
+            self.goal_actor_handles.append(goal_actor_handle)
             self.goal_indices.append(goal_idx)
 
         # convert indices to tensors
@@ -522,7 +505,7 @@ class BaseShadowModularGrasper(VecTask):
 
         return tip_contacts, n_tip_contacts
 
-    def update_obj_keypoints(self):
+    def update_keypoints(self):
 
         # update the current keypoint positions
         for i in range(self.n_keypoints):
@@ -557,7 +540,7 @@ class BaseShadowModularGrasper(VecTask):
         self._object_state_history.appendleft(self.root_state_tensor[self.obj_indices])
 
         # get keypoint positions
-        self.update_obj_keypoints()
+        self.update_keypoints()
 
         # compute pivot axel base on current object orn
         self.current_obj_pivot_axel_worldframe = quat_rotate(self.obj_base_orn, self.pivot_axel_objframe)
@@ -579,8 +562,8 @@ class BaseShadowModularGrasper(VecTask):
         self.obs_buf[:, 66:69] = self.pivot_point_pos_offset
         self.obs_buf[:, 69:87] = (self.obj_kp_positions
                                   - self.obj_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
-        self.obs_buf[:, 87:105] = (self.obj_kp_positions
-                                   - self.obj_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
+        self.obs_buf[:, 87:105] = (self.goal_kp_positions
+                                   - self.goal_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
         return self.obs_buf
 
     def reset_hand(self, env_ids_for_reset):
@@ -655,7 +638,7 @@ class BaseShadowModularGrasper(VecTask):
         """
         pass
 
-    def reset_goal_pose(self, env_ids_for_reset):
+    def reset_target_pose(self, env_ids_for_reset):
 
         # rotate goal pose
         rotate_interval = torch.ones(size=(self.num_envs, ), device=self.device) * 45 * np.pi / 180
@@ -669,7 +652,7 @@ class BaseShadowModularGrasper(VecTask):
         self.reset_hand(env_ids_for_reset)
         self.reset_object(env_ids_for_reset)
         self.reset_target_axis(env_ids_for_reset)
-        self.reset_goal_pose(env_ids_for_reset)
+        self.reset_target_pose(env_ids_for_reset)
 
         # reset buffers
         self.progress_buf[env_ids_for_reset] = 0
@@ -835,25 +818,7 @@ class BaseShadowModularGrasper(VecTask):
             self.progress_buf,
         )
 
-        self.extras.update({"env/metrics/"+k: v.mean() for k, v in log_dict.items()})
-
-
-@torch.jit.script
-def lgsk_kernel(x: torch.Tensor, scale: float = 50.0, eps: float = 2) -> torch.Tensor:
-    """Defines logistic kernel function to bound input
-
-    Ref: https://arxiv.org/abs/1901.08652 (page 15)
-
-    Args:
-        x: Input tensor.
-        scale: Scaling of the kernel function (controls how wide the 'bell' shape is')
-        eps: Controls how 'tall' the 'bell' shape is.
-
-    Returns:
-        Output tensor computed using kernel.
-    """
-    scaled = x * scale
-    return 1.0 / (scaled.exp() + eps + (-scaled).exp())
+        self.extras.update({"metrics/"+k: v.mean() for k, v in log_dict.items()})
 
 
 @torch.jit.script
@@ -871,6 +836,7 @@ def compute_manip_reward_keypoints(
 
     # Distance from the pivot point to the object base
     kp_deltas = torch.norm(obj_kps - goal_kps, p=2, dim=-1)
+    min_kp_dist, _ = kp_deltas.min(dim=-1)
 
     # bound and scale rewards such that they are in similar ranges
     kp_dist_rew = lgsk_kernel(kp_deltas, scale=50., eps=2.).mean(dim=-1) * 40.0
@@ -886,7 +852,7 @@ def compute_manip_reward_keypoints(
 
     # Check env termination conditions, including maximum success number
     resets = torch.zeros_like(reset_buf)
-    # resets = torch.where(dist_from_pivot >= fall_reset_dist, torch.ones_like(reset_buf), resets)
+    resets = torch.where(min_kp_dist >= fall_reset_dist, torch.ones_like(reset_buf), resets)
     resets = torch.where(progress_buf >= max_episode_length, torch.ones_like(resets), resets)
 
     info: Dict[str, torch.Tensor] = {

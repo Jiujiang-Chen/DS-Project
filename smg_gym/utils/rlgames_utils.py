@@ -70,13 +70,13 @@ def get_rlgames_env_creator(
             print("Horovod rank: ", rank)
 
             _sim_device = f'cuda:{rank}'
-            _rl_device = f'cuda:{rank}'
+            # _rl_device = f'cuda:{rank}'
 
             task_config['rank'] = rank
             task_config['rl_device'] = 'cuda:' + str(rank)
         else:
             _sim_device = sim_device
-            _rl_device = rl_device
+            # _rl_device = rl_device
 
         # create native task and pass custom config
         env = task_map[task_name](

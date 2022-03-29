@@ -11,7 +11,7 @@ import torch
 from isaacgym import gymtorch
 from isaacgym.torch_utils import torch_rand_float
 
-from smg_gym.rl_games_helpers.utils.torch_jit_utils import randomize_rotation
+from smg_gym.utils.torch_jit_utils import randomize_rotation
 from smg_gym.tasks.reorient.base_hand_env import BaseShadowModularGrasper
 
 
