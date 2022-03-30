@@ -1,20 +1,17 @@
 """
 Train:
-python train.py task=smg_pivot headless=True
+python train.py task=smg_reorient headless=True
 
 Test:
-python train.py task=smg_pivot task.env.numEnvs=8 test=True headless=False checkpoint=runs/smg_pivot/nn/smg_pivot.pth
+python train.py task=smg_reorient task.env.numEnvs=8 test=True headless=False checkpoint=runs/smg_reorient/nn/smg_reorient.pth
 """
-
-import torch
-
 from isaacgym.torch_utils import torch_rand_float
 
 from smg_gym.utils.torch_jit_utils import randomize_rotation
 from smg_gym.tasks.reorient.base_reorient import BaseReorient
 
 
-class SMGPivot(BaseReorient):
+class SMGReorient(BaseReorient):
 
     def __init__(
         self,
@@ -47,7 +44,7 @@ class SMGPivot(BaseReorient):
         # self.obj_name = 'cube'
         # self.obj_name = 'icosahedron'
 
-        super(SMGPivot, self).__init__(
+        super(SMGReorient, self).__init__(
             cfg,
             sim_device,
             graphics_device_id,
@@ -55,33 +52,22 @@ class SMGPivot(BaseReorient):
         )
 
     def reset_target_pose(self, goal_env_ids_for_reset):
-
-        # rand floats shape (n_envs, 3)
+        """
+        Reset target pose of the object.
+        """
         rand_floats = torch_rand_float(
             -1.0, 1.0,
-            (len(goal_env_ids_for_reset), 3),
+            (len(goal_env_ids_for_reset), 2),
             device=self.device
         )
 
-        # based on 3rd float zero half for pivoting around either x or y axis
-        rand_floats[:, 0] = torch.where(
-            rand_floats[:, 2] > 0,
-            torch.zeros(size=(len(goal_env_ids_for_reset),), device=self.device),
-            rand_floats[:, 0],
-        )
-        rand_floats[:, 1] = torch.where(
-            rand_floats[:, 2] <= 0,
-            torch.zeros(size=(len(goal_env_ids_for_reset),), device=self.device),
-            rand_floats[:, 1],
-        )
-
-        # pivot 1
-        new_goal_rot = randomize_rotation(
+        # full rand
+        new_goal_quat = randomize_rotation(
             rand_floats[:, 0],
             rand_floats[:, 1],
             self.x_unit_tensor[goal_env_ids_for_reset],
             self.y_unit_tensor[goal_env_ids_for_reset]
         )
 
-        self.root_state_tensor[self.goal_indices[goal_env_ids_for_reset], 3:7] = new_goal_rot
+        self.root_state_tensor[self.goal_indices[goal_env_ids_for_reset], 3:7] = new_goal_quat
         self.reset_goal_buf[goal_env_ids_for_reset] = 0

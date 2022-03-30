@@ -7,14 +7,13 @@ python train.py task=smg_rotate test=True task.env.numEnvs=8 headless=False chec
 """
 import torch
 
-from isaacgym import gymtorch
 from isaacgym.torch_utils import torch_rand_float
 
 from smg_gym.utils.torch_jit_utils import randomize_rotation
-from smg_gym.tasks.reorient.base_hand_env import BaseShadowModularGrasper
+from smg_gym.tasks.reorient.base_reorient import BaseReorient
 
 
-class SMGRotate(BaseShadowModularGrasper):
+class SMGRotate(BaseReorient):
 
     def __init__(
         self,
@@ -31,15 +30,15 @@ class SMGRotate(BaseShadowModularGrasper):
         obj_vel (6)
         prev_actions (9)
         tip_contacts (3)
-        obj_keypoint_pos (9)
+        obj_keypoint_pos (18)
         tcp_pos (9)
         goal_pose (7)
-        goal_keypoint_pos (9)
+        goal_keypoint_pos (18)
         rel_goal_orn (4)
 
-        total = 81
+        total = 99
         """
-        cfg["env"]["numObservations"] = 81
+        cfg["env"]["numObservations"] = 99
         cfg["env"]["numActions"] = 9
 
         # what object to use
@@ -54,33 +53,20 @@ class SMGRotate(BaseShadowModularGrasper):
             headless
         )
 
-    def reset_target_pose(self, env_ids, apply_reset=False):
+    def reset_target_pose(self, goal_env_ids_for_reset):
         rand_floats = torch_rand_float(
             -1.0, 1.0,
-            (len(env_ids), 1),
+            (len(goal_env_ids_for_reset), 1),
             device=self.device
         )
 
         # rotate
         new_goal_rot = randomize_rotation(
-            torch.zeros(size=(len(env_ids),), device=self.device),
+            torch.zeros(size=(len(goal_env_ids_for_reset),), device=self.device),
             rand_floats[:, 0],
-            self.x_unit_tensor[env_ids],
-            self.z_unit_tensor[env_ids]
+            self.x_unit_tensor[goal_env_ids_for_reset],
+            self.z_unit_tensor[goal_env_ids_for_reset]
         )
 
-        self.root_state_tensor[
-            self.goal_indices[env_ids]
-        ] = self.init_goal_states[env_ids].clone()
-        self.root_state_tensor[self.goal_indices[env_ids], 3:7] = new_goal_rot
-
-        if apply_reset:
-            goal_object_indices = self.goal_indices[env_ids].to(torch.int32)
-            self.gym.set_actor_root_state_tensor_indexed(
-                self.sim,
-                gymtorch.unwrap_tensor(self.root_state_tensor),
-                gymtorch.unwrap_tensor(goal_object_indices),
-                len(env_ids)
-            )
-
-        self.reset_goal_buf[env_ids] = 0
+        self.root_state_tensor[self.goal_indices[goal_env_ids_for_reset], 3:7] = new_goal_rot
+        self.reset_goal_buf[goal_env_ids_for_reset] = 0

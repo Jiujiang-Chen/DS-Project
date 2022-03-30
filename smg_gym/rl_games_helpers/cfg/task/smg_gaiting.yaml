@@ -7,29 +7,43 @@ physics_engine: ${..physics_engine}
 env:
   # numEnvs: 4
   # numEnvs: 1024
-  # numEnvs: 4096
-  numEnvs: 8192
+  numEnvs: 4096
+  # numEnvs: 8192
   # numEnvs: 16384
 
   envSpacing: 0.5
   enableDebugVis: True
 
+  # target settings
+  rotateIncrementDegrees: 30
+
   # action settings
   useRelativeControl: True
   dofSpeedScale: 10.0
   actionsMovingAverage: 1.0
-  controlFrequencyInv: 1
+  controlFrequencyInv: 2
 
   # reward/termination
   episodeLength: 1000
-  fallResetDist: 0.15
-  requireContact: False
-  posRewardScale: 4.0
-  ornRewardScale: 1.0
-  velRewardScale: 8.0
+  requireContact: True
   contactRewardScale: 0.0
   actionPenaltyScale: 0.0
-  fallPenaltyScale: 0.0
+  avFactor: 0.01
+  reachGoalBonus: 250
+  fallResetDist: 0.15
+  fallPenalty: 0.0
+
+  # rewardType: "hybrid"
+  distRewardScale: -10.0
+  rotRewardScale: 1.0
+  rotSuccessTolerance: 0.1
+  rotEps: 0.1
+
+  rewardType: "keypoint"
+  kpSuccessTolerance: 0.01
+  lgskScale: 50.0
+  lgskEps: 2.0
+  kpDistScale: 10.0
 
 task:
   randomize: True
@@ -44,7 +58,6 @@ sim:
   up_axis: "z"
   use_gpu_pipeline: ${eq:${...pipeline},"gpu"}
   gravity: [0.0, 0.0, -9.81]
-  # gravity: [0.0, 0.0, -0.1]
   physx:
     num_threads: ${....num_threads}
     solver_type: ${....solver_type}

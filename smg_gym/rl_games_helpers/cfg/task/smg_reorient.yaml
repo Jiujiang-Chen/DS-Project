@@ -1,5 +1,5 @@
 # used to create the object
-name: smg_manip
+name: smg_reorient
 
 physics_engine: ${..physics_engine}
 
@@ -21,17 +21,25 @@ env:
 
   # reward/termination
   episodeLength: 1000
-  distRewardScale: -10.0
-  rotRewardScale: 1.0
   requireContact: True
   contactRewardScale: 0.0
   actionPenaltyScale: 0.0
-  successTolerance: 0.02
+  avFactor: 0.01
   reachGoalBonus: 250
   fallResetDist: 0.15
   fallPenalty: 0.0
-  avFactor: 0.01
+
+  # rewardType: "hybrid"
+  distRewardScale: -10.0
+  rotRewardScale: 1.0
+  rotSuccessTolerance: 0.1
   rotEps: 0.1
+
+  rewardType: "keypoint"
+  kpSuccessTolerance: 0.02
+  lgskScale: 50.0
+  lgskEps: 2.0
+  kpDistScale: 10.0
 
 task:
   randomize: True

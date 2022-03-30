@@ -48,7 +48,7 @@ headless: True
 
 # set default task and default training config based on task
 defaults:
-  - task: smg_manip
+  - task: smg_reorient
   - train: ${task}_ppo
   - hydra/job_logging: disabled
 

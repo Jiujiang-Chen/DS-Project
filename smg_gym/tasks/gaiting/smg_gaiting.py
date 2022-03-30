@@ -9,18 +9,18 @@ Test:
 python train.py task=smg_gaiting task.env.numEnvs=8 test=True headless=False checkpoint=runs/smg_gaiting/nn/smg_gaiting.pth
 """
 import torch
-from torch import Tensor
-import numpy as np
 
 from isaacgym.torch_utils import to_torch
 from isaacgym.torch_utils import torch_rand_float
 from isaacgym.torch_utils import quat_rotate
 from isaacgym.torch_utils import quat_rotate_inverse
 
-from smg_gym.tasks.gaiting.base_hand_env import BaseShadowModularGrasper
+from smg_gym.tasks.gaiting.base_gaiting import BaseGaiting
+from smg_gym.utils.torch_jit_utils import torch_random_dir
+from smg_gym.utils.torch_jit_utils import torch_random_cardinal_dir
 
 
-class SMGGaiting(BaseShadowModularGrasper):
+class SMGGaiting(BaseGaiting):
 
     def __init__(
         self,
@@ -37,13 +37,15 @@ class SMGGaiting(BaseShadowModularGrasper):
         obj_vel (6)
         prev_actions (9)
         tip_contacts (3)
-        obj_keypoint_pos (9)
-        tcp_pos (9)
+        fingertip_pos (9)
         goal_pose (7)
-        goal_keypoint_pos (9)
-        rel_goal_orn (4)
+        goal_obj_active_quat (4)
+        pivot_axel_workframe (3)
+        pivot_point_pos (3)
+        obj_keypoint_pos (18)
+        goal_keypoint_pos (18)
 
-        total = 81
+        total = 105
         """
         cfg["env"]["numObservations"] = 105
         cfg["env"]["numActions"] = 9
@@ -85,7 +87,11 @@ class SMGGaiting(BaseShadowModularGrasper):
 
         # randomise direction of pivot axel
         if self.randomize and self.rand_pivot_axel:
-            self.pivot_axel_workframe[env_ids_for_reset, :] = torch_random_dir(
+            # self.pivot_axel_workframe[env_ids_for_reset, :] = torch_random_dir(
+            #     num_envs_to_reset,
+            #     device=self.device
+            # )
+            self.pivot_axel_workframe[env_ids_for_reset, :] = torch_random_cardinal_dir(
                 num_envs_to_reset,
                 device=self.device
             )
@@ -103,17 +109,3 @@ class SMGGaiting(BaseShadowModularGrasper):
         obj_base_orn = self.root_state_tensor[self.obj_indices, 3:7]
         self.pivot_axel_objframe[env_ids_for_reset] = quat_rotate_inverse(
             obj_base_orn[env_ids_for_reset], self.pivot_axel_worldframe[env_ids_for_reset, :])
-
-
-@torch.jit.script
-def torch_random_dir(num_envs_to_reset, device):
-    # type: (int, str) -> Tensor
-    phi = torch_rand_float(0.0, 2*np.pi, (num_envs_to_reset, 1), device).squeeze(-1)
-    costheta = torch_rand_float(-1.0, 1.0, (num_envs_to_reset, 1), device).squeeze(-1)
-    theta = torch.arccos(costheta)
-
-    return torch.stack([
-        torch.sin(theta) * torch.cos(phi),
-        torch.sin(theta) * torch.sin(phi),
-        torch.cos(theta)
-    ], dim=-1)
