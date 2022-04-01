@@ -2,6 +2,9 @@ import numpy as np
 import os
 import torch
 
+from isaacgym.torch_utils import unscale
+from isaacgym.torch_utils import quat_mul
+from isaacgym.torch_utils import quat_conjugate
 from isaacgym.torch_utils import quat_rotate
 from isaacgym.torch_utils import to_torch
 from isaacgym.torch_utils import torch_rand_float
@@ -20,12 +23,19 @@ from smg_gym.assets import add_assets_path
 
 
 class BaseShadowModularGrasper(VecTask):
-    def __init__(self, cfg, sim_device, graphics_device_id, headless):
+    def __init__(
+        self,
+        cfg,
+        sim_device,
+        graphics_device_id,
+        headless
+    ):
 
         # setup params
         self.cfg = cfg
         self.debug_viz = cfg["env"]["enableDebugVis"]
         self.env_spacing = cfg["env"]["envSpacing"]
+        self.obj_name = cfg["env"]["objName"]
 
         # action params
         self.use_relative_control = cfg["env"]["useRelativeControl"]
@@ -81,10 +91,38 @@ class BaseShadowModularGrasper(VecTask):
         self.total_resets = 0
 
         # get indices useful for contacts
-        self._setup_contacts()
+        self._setup_fingertip_tracking()
+        self._setup_contact_tracking()
 
         # refresh all tensors
         self.refresh_tensors()
+
+    def allocate_buffers(self):
+        """Allocate the observation, states, etc. buffers.
+
+        These are what is used to set observations and states in the environment classes which
+        inherit from this one, and are read in `step` and other related functions.
+
+        """
+
+        # allocate buffers
+        self.obs_buf = torch.zeros(
+            (self.num_envs, self.num_obs), device=self.device, dtype=torch.float)
+        self.states_buf = torch.zeros(
+            (self.num_envs, self.num_states), device=self.device, dtype=torch.float)
+        self.action_buf = torch.zeros(
+            (self.num_envs, self.num_actions), device=self.device, dtype=torch.float)
+        self.rew_buf = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.float)
+        self.reset_buf = torch.ones(
+            self.num_envs, device=self.device, dtype=torch.long)
+        self.timeout_buf = torch.zeros(
+             self.num_envs, device=self.device, dtype=torch.long)
+        self.progress_buf = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.long)
+        self.randomize_buf = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.long)
+        self.extras = {}
 
     def create_sim(self):
         self.dt = self.sim_params.dt
@@ -146,26 +184,26 @@ class BaseShadowModularGrasper(VecTask):
                 -20.0*(np.pi/180),
                 7.5*(np.pi/180),
                 -10.0*(np.pi/180),
-            ] * 3))
+            ] * 3), device=self.device)
 
             self.init_joint_maxs = to_torch(np.array([
                 20.0*(np.pi/180),
                 7.5*(np.pi/180),
                 -10.0*(np.pi/180),
-            ] * 3))
+            ] * 3), device=self.device)
 
         else:
             self.init_joint_mins = to_torch(np.array([
                 0.0*(np.pi/180),
                 7.5*(np.pi/180),
                 -10.0*(np.pi/180),
-            ] * 3))
+            ] * 3), device=self.device)
 
             self.init_joint_maxs = to_torch(np.array([
                 0.0*(np.pi/180),
                 7.5*(np.pi/180),
                 -10.0*(np.pi/180),
-            ] * 3))
+            ] * 3), device=self.device)
 
         # get hand limits
         hand_dof_props = self.gym.get_asset_dof_properties(self.hand_asset)
@@ -234,7 +272,7 @@ class BaseShadowModularGrasper(VecTask):
 
     def _setup_keypoints(self):
 
-        self.kp_dist = 0.05
+        self.kp_dist = 0.06
         self.n_keypoints = 6
 
         self.obj_kp_positions = torch.zeros(size=(self.num_envs, self.n_keypoints, 3), device=self.device)
@@ -359,12 +397,11 @@ class BaseShadowModularGrasper(VecTask):
         handle = self.gym.create_actor(env, self.goal_asset, init_goal_pose, "goal_actor_{}".format(idx), 0, 0)
         return handle
 
-    def _setup_contacts(self):
+    def _setup_contact_tracking(self):
         self.n_tips = 3
         self.obj_body_idx, self.tip_body_idxs = self._get_contact_idxs(
             self.envs[0], self.obj_actor_handles[0], self.hand_actor_handles[0]
         )
-        self.fingertip_tcp_body_idxs = self._get_fingertip_tcp_idxs(self.envs[0], self.hand_actor_handles[0])
 
     def _get_contact_idxs(self, env, obj_actor_handle, hand_actor_handle):
 
@@ -379,6 +416,9 @@ class BaseShadowModularGrasper(VecTask):
 
         return obj_body_idx, tip_body_idxs
 
+    def _setup_fingertip_tracking(self):
+        self.fingertip_tcp_body_idxs = self._get_fingertip_tcp_idxs(self.envs[0], self.hand_actor_handles[0])
+
     def _get_fingertip_tcp_idxs(self, env, hand_actor_handle):
 
         hand_body_names = self.gym.get_actor_rigid_body_names(env, hand_actor_handle)
@@ -389,32 +429,38 @@ class BaseShadowModularGrasper(VecTask):
 
         return fingertip_tcp_body_idxs
 
+    def get_rich_fingertip_contacts(self):
+        for i in range(self.num_envs):
+            contacts = self.gym.get_env_rigid_contacts(self.envs[i])
+            # print(contacts)
+
     def get_fingertip_contacts(self):
 
         # get envs where obj is contacted
-        obj_contacts = torch.where(
+        bool_obj_contacts = torch.where(
             torch.count_nonzero(self.contact_force_tensor[:, self.obj_body_idx, :], dim=1) > 0,
             torch.ones(size=(self.num_envs,), device=self.device),
             torch.zeros(size=(self.num_envs,), device=self.device),
         )
 
-        # reshape to (n_envs, n_tips)
-        obj_contacts = obj_contacts.repeat(self.n_tips, 1).T
-
         # get envs where tips are contacted
-        tip_contacts = torch.where(
-            torch.count_nonzero(self.contact_force_tensor[:, self.tip_body_idxs, :], dim=2) > 0,
+        net_tip_contact_forces = self.contact_force_tensor[:, self.tip_body_idxs, :]
+        bool_tip_contacts = torch.where(
+            torch.count_nonzero(net_tip_contact_forces, dim=2) > 0,
             torch.ones(size=(self.num_envs, self.n_tips), device=self.device),
             torch.zeros(size=(self.num_envs, self.n_tips), device=self.device),
         )
 
-        # get envs where object and tips are contated
-        tip_contacts = torch.where(
-            obj_contacts > 0, tip_contacts, torch.zeros(size=(self.num_envs, self.n_tips), device=self.device)
-        )
-        n_tip_contacts = torch.sum(tip_contacts, dim=1)
+        # repeat for n_tips shape=(n_envs, n_tips)
+        onehot_obj_contacts = bool_obj_contacts.unsqueeze(1).repeat(1, self.n_tips)
 
-        return tip_contacts, n_tip_contacts
+        # get envs where object and tips are contated
+        tip_object_contacts = torch.where(
+            onehot_obj_contacts > 0, bool_tip_contacts, torch.zeros(size=(self.num_envs, self.n_tips), device=self.device)
+        )
+        n_tip_contacts = torch.sum(bool_tip_contacts, dim=1)
+
+        return net_tip_contact_forces, tip_object_contacts, n_tip_contacts
 
     def pre_physics_step(self, actions):
         """Apply the actions to the environment (eg by setting torques, position targets).
@@ -431,7 +477,8 @@ class BaseShadowModularGrasper(VecTask):
 
         self.refresh_tensors()
         self.compute_observations()
-        self.fill_observations()
+        self.fill_observation_buffer()
+        self.fill_states_buffer()
         self.compute_reward_and_termination()
 
         if self.viewer and self.debug_viz:
@@ -446,11 +493,114 @@ class BaseShadowModularGrasper(VecTask):
         self.gym.refresh_rigid_body_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
 
-    def fill_observations(self):
+    def standard_fill_buffer(self, buf, buf_cfg):
         """
-        Fill observation buffer.
+        Fill observation buffer with observations shared across different tasks.
+
+        Change offset outside of conditional to keep the same indices in the buffer, allows for disabling
+        observations after learning.
         """
-        pass
+
+        # joint position
+        start_offset = 0
+        end_offset = start_offset + 9
+        if buf_cfg["jointPos"]:
+            buf[:, start_offset:end_offset] = unscale(
+                self.hand_joint_pos, self.hand_dof_lower_limits, self.hand_dof_upper_limits)
+
+        # joint velocity
+        start_offset = end_offset
+        end_offset = start_offset + 9
+        if buf_cfg["jointVel"]:
+            buf[:, start_offset:end_offset] = self.hand_joint_vel
+
+        # fingertip positions
+        start_offset = end_offset
+        end_offset = start_offset + 9
+        if buf_cfg["fingertipPos"]:
+            buf[:, start_offset:end_offset] = self.fingertip_pos
+
+        # fingertip orn
+        start_offset = end_offset
+        end_offset = start_offset + 12
+        if buf_cfg["fingertipOrn"]:
+            buf[:, start_offset:end_offset] = self.fingertip_orn.reshape(self.num_envs, self.n_tips*4)
+
+        # latest actions
+        start_offset = end_offset
+        end_offset = start_offset + 9
+        if buf_cfg["lastAction"]:
+            buf[:, start_offset:end_offset] = self.actions
+
+        # boolean tips in contacts
+        start_offset = end_offset
+        end_offset = start_offset + 3
+        if buf_cfg["boolTipContacts"]:
+            buf[:, start_offset:end_offset] = self.tip_object_contacts
+
+        # tip contact forces
+        start_offset = end_offset
+        end_offset = start_offset + 9
+        if buf_cfg["tipContactForces"]:
+            buf[:, start_offset:end_offset] = self.net_tip_contact_forces.reshape(self.num_envs, self.n_tips*3)
+
+        # object position
+        start_offset = end_offset
+        end_offset = start_offset + 3
+        if buf_cfg["objectPos"]:
+            buf[:, start_offset:end_offset] = self.obj_base_pos
+
+        # object orientation
+        start_offset = end_offset
+        end_offset = start_offset + 4
+        if buf_cfg["objectOrn"]:
+            buf[:, start_offset:end_offset] = self.obj_base_orn
+
+        # object keypoints
+        start_offset = end_offset
+        end_offset = start_offset + self.n_keypoints*3
+        if buf_cfg["objectKPs"]:
+            buf[:, start_offset:end_offset] = (self.obj_kp_positions
+                                               - self.obj_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
+
+        # object linear velocity
+        start_offset = end_offset
+        end_offset = start_offset + 3
+        if buf_cfg["objectLinVel"]:
+            buf[:, start_offset:end_offset] = self.obj_base_linvel
+
+        # object angular velocity
+        start_offset = end_offset
+        end_offset = start_offset + 3
+        if buf_cfg["objectAngVel"]:
+            buf[:, start_offset:end_offset] = self.obj_base_angvel
+
+        # goal position
+        start_offset = end_offset
+        end_offset = start_offset + 3
+        if buf_cfg["GoalPos"]:
+            buf[:, start_offset:end_offset] = self.goal_base_pos
+
+        # goal orientation
+        start_offset = end_offset
+        end_offset = start_offset + 4
+        if buf_cfg["GoalOrn"]:
+            buf[:, start_offset:end_offset] = self.goal_base_orn
+
+        # goal keypoints
+        start_offset = end_offset
+        end_offset = start_offset + self.n_keypoints*3
+        if buf_cfg["GoalKPs"]:
+            buf[:, start_offset:end_offset] = (self.goal_kp_positions
+                                               - self.goal_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
+
+        # active quat between goal and object
+        start_offset = end_offset
+        end_offset = start_offset + 4
+        if buf_cfg["activeQuat"]:
+            self.obs_buf[:, start_offset:end_offset] = quat_mul(self.obj_base_orn, quat_conjugate(self.goal_base_orn))
+
+        return start_offset, end_offset
 
     def compute_reward_and_termination(self):
         """
@@ -608,7 +758,8 @@ class BaseShadowModularGrasper(VecTask):
     def compute_observations(self):
 
         # get which tips are in contact
-        self.tip_contacts, self.n_tip_contacts = self.get_fingertip_contacts()
+        self.net_tip_contact_forces, self.tip_object_contacts, self.n_tip_contacts = self.get_fingertip_contacts()
+        # self.get_rich_fingertip_contacts()
 
         # get tcp positions
         fingertip_states = self.rigid_body_tensor[:, self.fingertip_tcp_body_idxs, :]
@@ -644,6 +795,11 @@ class BaseShadowModularGrasper(VecTask):
 
         for i in range(self.num_envs):
 
+            # draw contacts
+            if self.device == 'cpu':
+                contact_color = gymapi.Vec3(1, 0, 0)
+                self.gym.draw_env_rigid_contacts(self.viewer, self.envs[i], contact_color, 0.2, True)
+
             for j in range(self.n_keypoints):
                 pose = gymapi.Transform()
 
@@ -678,3 +834,53 @@ class BaseShadowModularGrasper(VecTask):
                     self.envs[i],
                     pose
                 )
+
+    """
+    Properties
+    """
+
+    def get_gravity(self) -> np.ndarray:
+        """Returns the gravity set in the simulator.
+        """
+        gravity = self.sim_params.gravity
+        return np.asarray([gravity.x, gravity.y, gravity.z])
+
+    def get_sim_params(self) -> gymapi.SimParams:
+        """Returns the simulator physics parameters.
+        """
+        return self.sim_params
+
+    def get_state_shape(self) -> torch.Size:
+        """Returns the size of the state buffer: [num. instances, num. of state]
+        """
+        return self.states_buf.size()
+
+    def get_obs_shape(self) -> torch.Size:
+        """Returns the size of the observation buffer: [num. instances, num. of obs]
+        """
+        return self.obs_buf.size()
+
+    def get_action_shape(self) -> torch.Size:
+        """Returns the size of the action buffer: [num. instances, num. of action]
+        """
+        return self.action_buf.size()
+
+    def get_num_envs(self) -> int:
+        """Returns number of environment instances
+        """
+        return self.num_envs
+
+    def get_state_dim(self) -> int:
+        """Returns imensions of state specfication.
+        """
+        return self.get_state_shape()[1]
+
+    def get_obs_dim(self) -> int:
+        """Returns imensions of obs specfication.
+        """
+        return self.get_obs_shape()[1]
+
+    def get_action_dim(self) -> int:
+        """Returns imensions of action specfication.
+        """
+        return self.get_action_shape()[1]

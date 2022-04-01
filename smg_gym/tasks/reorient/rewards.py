@@ -84,9 +84,10 @@ def compute_hybrid_reorient_reward(
     )
 
     info: Dict[str, torch.Tensor] = {
-        'num_tip_contacts': n_tip_contacts,
         'successes': successes,
         'cons_successes': cons_successes,
+        'action_penalty': action_penalty,
+        'num_tip_contacts': n_tip_contacts,
         'total_reward': total_reward,
     }
 
@@ -165,9 +166,10 @@ def compute_keypoint_reorient_reward(
     )
 
     info: Dict[str, torch.Tensor] = {
-        'num_tip_contacts': n_tip_contacts,
         'successes': successes,
         'cons_successes': cons_successes,
+        'action_penalty': action_penalty,
+        'num_tip_contacts': n_tip_contacts,
         'total_reward': total_reward,
     }
 

@@ -13,6 +13,11 @@ env:
   envSpacing: 0.5
   enableDebugVis: True
 
+  # env settings
+  objName: 'sphere'
+  # objName: 'cube'
+  # objName: 'icosahedron'
+
   # action settings
   useRelativeControl: True
   dofSpeedScale: 10.0

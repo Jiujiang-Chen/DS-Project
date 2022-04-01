@@ -6,14 +6,13 @@ from isaacgym import gymapi
 from isaacgym import gymutil
 
 from isaacgym.torch_utils import to_torch
-from isaacgym.torch_utils import unscale
 from isaacgym.torch_utils import quat_mul
-from isaacgym.torch_utils import quat_conjugate
 from isaacgym.torch_utils import quat_rotate
 from isaacgym.torch_utils import quat_from_angle_axis
 
 from smg_gym.tasks.base_hand import BaseShadowModularGrasper
 from smg_gym.tasks.reorient.rewards import compute_keypoint_reorient_reward
+from smg_gym.tasks.reorient.rewards import compute_hybrid_reorient_reward
 
 
 class BaseGaiting(BaseShadowModularGrasper):
@@ -32,7 +31,7 @@ class BaseGaiting(BaseShadowModularGrasper):
         self.reward_type = cfg["env"]["rewardType"]
         self.max_episode_length = cfg["env"]["episodeLength"]
 
-        if self.reward_type not in ["keypoint"]:
+        if self.reward_type not in ["hybrid", "keypoint"]:
             raise ValueError('Incorrect reward mode specified.')
 
         # randomisation params
@@ -153,38 +152,106 @@ class BaseGaiting(BaseShadowModularGrasper):
         self.reset_buf[env_ids_for_reset] = 0
         self.successes[env_ids_for_reset] = 0
 
-    def fill_observations(self):
+    def fill_observation_buffer(self):
         """
         Fill observation buffer.
+        shape = (num_envs, num_obs)
         """
 
-        # obs_buf shape=(num_envs, num_obs)
-        self.obs_buf[:, :9] = unscale(self.hand_joint_pos, self.hand_dof_lower_limits, self.hand_dof_upper_limits)
-        self.obs_buf[:, 9:18] = self.hand_joint_vel
-        self.obs_buf[:, 18:21] = self.obj_base_pos
-        self.obs_buf[:, 21:25] = self.obj_base_orn
-        self.obs_buf[:, 25:28] = self.obj_base_linvel
-        self.obs_buf[:, 28:31] = self.obj_base_angvel
-        self.obs_buf[:, 31:40] = self.actions
-        self.obs_buf[:, 40:43] = self.tip_contacts
-        self.obs_buf[:, 43:52] = self.fingertip_pos
-        self.obs_buf[:, 52:55] = self.goal_base_pos
-        self.obs_buf[:, 55:59] = self.goal_base_orn
-        self.obs_buf[:, 59:63] = quat_mul(self.obj_base_orn, quat_conjugate(self.goal_base_orn))
-        self.obs_buf[:, 63:66] = self.pivot_axel_workframe
-        self.obs_buf[:, 66:69] = self.pivot_point_pos_offset
-        self.obs_buf[:, 69:87] = (self.obj_kp_positions
-                                  - self.obj_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
-        self.obs_buf[:, 87:105] = (self.goal_kp_positions
-                                   - self.goal_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
+        # fill obs buffer with observations shared across tasks.
+        obs_cfg = self.cfg["enabledObs"]
+        start_offset, end_offset = self.standard_fill_buffer(self.obs_buf, obs_cfg)
+
+        # target pivot axel vec
+        start_offset = end_offset
+        end_offset = start_offset + 3
+        if obs_cfg["pivotAxelVec"]:
+            self.obs_buf[:, start_offset:end_offset] = self.pivot_axel_workframe
+
+        # target pivot axel pos
+        start_offset = end_offset
+        end_offset = start_offset + 3
+        if obs_cfg["pivotAxelPos"]:
+            self.obs_buf[:, start_offset:end_offset] = self.pivot_point_pos_offset
+
         return self.obs_buf
+
+    def fill_states_buffer(self):
+        """
+        Fill states buffer.
+        shape = (num_envs, num_obs)
+        """
+        # if states spec is empty then return
+        if not self.cfg["asymmetricObs"]:
+            return
+
+        # fill obs buffer with observations shared across tasks.
+        states_cfg = self.cfg["enabledStates"]
+        start_offset, end_offset = self.standard_fill_buffer(self.states_buf, states_cfg)
+
+        # target pivot axel vec
+        start_offset = end_offset
+        end_offset = start_offset + 3
+        if states_cfg["pivotAxelVec"]:
+            self.states_buf[:, start_offset:end_offset] = self.pivot_axel_workframe
+
+        # target pivot axel pos
+        start_offset = end_offset
+        end_offset = start_offset + 3
+        if states_cfg["pivotAxelPos"]:
+            self.states_buf[:, start_offset:end_offset] = self.pivot_point_pos_offset
+
+        return self.states_buf
 
     def compute_reward_and_termination(self):
         """
         Calculate the reward and termination (including goal successes) per env.
         """
+
+        centered_obj_kp_pos = self.obj_kp_positions - \
+            self.obj_displacement_tensor.unsqueeze(0).unsqueeze(1).repeat(self.num_envs, self.n_keypoints, 1)
+        centered_goal_kp_pos = self.goal_kp_positions - \
+            self.goal_displacement_tensor.unsqueeze(0).unsqueeze(1).repeat(self.num_envs, self.n_keypoints, 1) - \
+            self.pivot_point_pos_offset.unsqueeze(1).repeat(1, self.n_keypoints, 1)
+
+        # shadow hand pos + orn distance rew
+        if self.reward_type == 'hybrid':
+            (
+                self.rew_buf[:],
+                self.reset_buf[:],
+                self.reset_goal_buf[:],
+                self.successes[:],
+                self.consecutive_successes[:],
+                log_dict
+            ) = compute_hybrid_reorient_reward(
+                rew_buf=self.rew_buf,
+                reset_buf=self.reset_buf,
+                progress_buf=self.progress_buf,
+                reset_goal_buf=self.reset_goal_buf,
+                successes=self.successes,
+                consecutive_successes=self.consecutive_successes,
+                obj_base_pos=self.obj_base_pos - self.obj_displacement_tensor,
+                obj_base_orn=self.obj_base_orn,
+                targ_base_pos=self.goal_base_pos - self.goal_displacement_tensor,
+                targ_base_orn=self.goal_base_orn,
+                actions=self.actions,
+                n_tip_contacts=self.n_tip_contacts,
+                dist_reward_scale=self.cfg["env"]["distRewardScale"],
+                rot_reward_scale=self.cfg["env"]["rotRewardScale"],
+                rot_eps=self.cfg["env"]["rotEps"],
+                success_tolerance=self.cfg["env"]["rotSuccessTolerance"],
+                max_episode_length=self.cfg["env"]["episodeLength"],
+                fall_reset_dist=self.cfg["env"]["fallResetDist"],
+                require_contact=self.cfg["env"]["requireContact"],
+                contact_reward_scale=self.cfg["env"]["contactRewardScale"],
+                action_penalty_scale=self.cfg["env"]["actionPenaltyScale"],
+                reach_goal_bonus=self.cfg["env"]["reachGoalBonus"],
+                fall_penalty=self.cfg["env"]["fallPenalty"],
+                av_factor=self.cfg["env"]["avFactor"],
+            )
+
         # trifinger - keypoint distance reward
-        if self.reward_type == 'keypoint':
+        elif self.reward_type == 'keypoint':
             (
                 self.rew_buf[:],
                 self.reset_buf[:],
@@ -199,8 +266,8 @@ class BaseGaiting(BaseShadowModularGrasper):
                 reset_goal_buf=self.reset_goal_buf,
                 successes=self.successes,
                 consecutive_successes=self.consecutive_successes,
-                obj_kps=self.obj_kp_positions - self.obj_displacement_tensor,
-                goal_kps=self.goal_kp_positions - self.goal_displacement_tensor,
+                obj_kps=centered_obj_kp_pos,
+                goal_kps=centered_goal_kp_pos,
                 actions=self.actions,
                 n_tip_contacts=self.n_tip_contacts,
                 lgsk_scale=self.cfg["env"]["lgskScale"],

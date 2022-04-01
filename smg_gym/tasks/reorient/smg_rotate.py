@@ -41,11 +41,6 @@ class SMGRotate(BaseReorient):
         cfg["env"]["numObservations"] = 99
         cfg["env"]["numActions"] = 9
 
-        # what object to use
-        self.obj_name = 'sphere'
-        # self.obj_name = 'cube'
-        # self.obj_name = 'icosahedron'
-
         super(SMGRotate, self).__init__(
             cfg,
             sim_device,

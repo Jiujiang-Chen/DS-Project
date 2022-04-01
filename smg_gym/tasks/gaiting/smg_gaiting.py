@@ -30,30 +30,33 @@ class SMGGaiting(BaseGaiting):
         headless
     ):
         """
-        Obs =
-        joint_pos (9)
-        joint_vel (9)
-        obj_pose (7)
-        obj_vel (6)
-        prev_actions (9)
-        tip_contacts (3)
-        fingertip_pos (9)
-        goal_pose (7)
-        goal_obj_active_quat (4)
-        pivot_axel_workframe (3)
-        pivot_point_pos (3)
-        obj_keypoint_pos (18)
-        goal_keypoint_pos (18)
-
-        total = 105
+        Obs:
+            jointPos: 9
+            jointVel: 9
+            fingertipPos: 9
+            fingertipOrn: 12
+            lastAction: 9
+            boolTipContacts: 3
+            tipContactForces: 9
+            objectPos: 3
+            objectOrn: 4
+            objectKPs: 18
+            objectLinVel: 3
+            objectAngVel: 3
+            GoalPos: 3
+            GoalOrn: 4
+            GoalKPs: 18
+            activeQuat: 4
+            pivotAxelVec: 3
+            pivotAxelPos: 3
+        max_total = 126
         """
-        cfg["env"]["numObservations"] = 105
-        cfg["env"]["numActions"] = 9
+        cfg["env"]["numObservations"] = 126
 
-        # what object to use
-        self.obj_name = 'sphere'
-        # self.obj_name = 'cube'
-        # self.obj_name = 'icosahedron'
+        if cfg["asymmetricObs"]:
+            cfg["env"]["numStates"] = 126
+
+        cfg["env"]["numActions"] = 9
 
         super(SMGGaiting, self).__init__(
             cfg,

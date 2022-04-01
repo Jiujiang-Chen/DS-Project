@@ -22,10 +22,16 @@ max_iterations: ''
 ## Device config
 #  'physx' or 'flex'
 physics_engine: 'physx'
-# whether to use cpu or gpu pipeline
+
+
+# # whether to use cpu or gpu pipeline
+# pipeline: 'cpu'
 pipeline: 'gpu'
+
 # device for running physics simulation
 sim_device: 'cuda:0'
+# sim_device: 'cpu'
+
 # device to run RL
 rl_device: 'cuda:0'
 graphics_device_id: 0

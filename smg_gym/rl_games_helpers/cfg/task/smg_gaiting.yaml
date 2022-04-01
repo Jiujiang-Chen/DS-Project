@@ -14,7 +14,10 @@ env:
   envSpacing: 0.5
   enableDebugVis: True
 
-  # target settings
+  # env settings
+  objName: 'sphere'
+  # objName: 'cube'
+  # objName: 'icosahedron'
   rotateIncrementDegrees: 30
 
   # action settings
@@ -23,7 +26,7 @@ env:
   actionsMovingAverage: 1.0
   controlFrequencyInv: 2
 
-  # reward/termination
+  # shared reward/termination
   episodeLength: 1000
   requireContact: True
   contactRewardScale: 0.0
@@ -40,7 +43,7 @@ env:
   rotEps: 0.1
 
   rewardType: "keypoint"
-  kpSuccessTolerance: 0.01
+  kpSuccessTolerance: 0.02
   lgskScale: 50.0
   lgskEps: 2.0
   kpDistScale: 10.0
@@ -48,9 +51,50 @@ env:
 task:
   randomize: True
   randHandJoints: True
-  randObjInitOrn: False
+  randObjInitOrn: True
   randPivotPos: False
   randPivotAxel: False
+
+asymmetricObs: True
+enabledObs:
+    jointPos: True
+    jointVel: True
+    fingertipPos: True
+    fingertipOrn: True
+    lastAction: True
+    boolTipContacts: True
+    tipContactForces: True
+    objectPos: False
+    objectOrn: False
+    objectKPs: False
+    objectLinVel: False
+    objectAngVel: False
+    GoalPos: False
+    GoalOrn: False
+    GoalKPs: False
+    activeQuat: False
+    pivotAxelVec: True
+    pivotAxelPos: True
+
+enabledStates:
+    jointPos: True
+    jointVel: True
+    fingertipPos: True
+    fingertipOrn: True
+    lastAction: True
+    boolTipContacts: True
+    tipContactForces: True
+    objectPos: True
+    objectOrn: True
+    objectKPs: True
+    objectLinVel: True
+    objectAngVel: True
+    GoalPos: True
+    GoalOrn: True
+    GoalKPs: True
+    activeQuat: True
+    pivotAxelVec: True
+    pivotAxelPos: True
 
 sim:
   dt: 0.02

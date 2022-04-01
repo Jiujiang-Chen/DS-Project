@@ -49,7 +49,7 @@ class BaseReorient(BaseShadowModularGrasper):
         self.obs_buf[:, 25:28] = self.obj_base_linvel
         self.obs_buf[:, 28:31] = self.obj_base_angvel
         self.obs_buf[:, 31:40] = self.actions
-        self.obs_buf[:, 40:43] = self.tip_contacts
+        self.obs_buf[:, 40:43] = self.tip_object_contacts
         self.obs_buf[:, 43:52] = self.fingertip_pos
         self.obs_buf[:, 52:55] = self.goal_base_pos
         self.obs_buf[:, 55:59] = self.goal_base_orn
@@ -58,6 +58,7 @@ class BaseReorient(BaseShadowModularGrasper):
                                   - self.obj_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
         self.obs_buf[:, 81:99] = (self.goal_kp_positions
                                   - self.goal_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
+
         return self.obs_buf
 
     def compute_reward_and_termination(self):
