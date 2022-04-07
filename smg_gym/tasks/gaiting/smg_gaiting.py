@@ -3,10 +3,10 @@ Train:
 python train.py task=smg_gaiting headless=True
 
 # train low env num
-python train.py task=smg_gaiting task.env.numEnvs=8 headless=False
+python train.py task=smg_gaiting task.env.num_envs=8 headless=False
 
 Test:
-python train.py task=smg_gaiting task.env.numEnvs=8 test=True headless=False checkpoint=runs/smg_gaiting/nn/smg_gaiting.pth
+python train.py task=smg_gaiting task.env.num_envs=8 test=True headless=False checkpoint=runs/smg_gaiting/nn/smg_gaiting.pth
 """
 import torch
 
@@ -31,29 +31,30 @@ class SMGGaiting(BaseGaiting):
     ):
         """
         Obs:
-            jointPos: 9
-            jointVel: 9
-            fingertipPos: 9
-            fingertipOrn: 12
-            lastAction: 9
-            boolTipContacts: 3
-            tipContactForces: 9
-            objectPos: 3
-            objectOrn: 4
-            objectKPs: 18
-            objectLinVel: 3
-            objectAngVel: 3
-            GoalPos: 3
-            GoalOrn: 4
-            GoalKPs: 18
-            activeQuat: 4
-            pivotAxelVec: 3
-            pivotAxelPos: 3
+            joint_pos: 9
+            joint_vel: 9
+            fingertip_pos: 9
+            fingertip_orn: 12
+            last_action: 9
+            bool_tip_contacts: 3
+            tip_contact_forces: 9
+            object_pos: 3
+            object_orn: 4
+            object_kps: 18
+            object_linvel: 3
+            object_angvel: 3
+            goal_pos: 3
+            goal_orn: 4
+            goal_kps: 18
+            active_quat: 4
+            pivot_axel_vec: 3
+            pivot_axel_pos: 3
         max_total = 126
         """
+
         cfg["env"]["numObservations"] = 126
 
-        if cfg["asymmetricObs"]:
+        if cfg["asymmetric_obs"]:
             cfg["env"]["numStates"] = 126
 
         cfg["env"]["numActions"] = 9
@@ -88,22 +89,25 @@ class SMGGaiting(BaseGaiting):
 
         self.pivot_point_pos[env_ids_for_reset, :] = pivot_point_pos + self.pivot_point_pos_offset[env_ids_for_reset, :]
 
+        # set the default axel direction
+        self.pivot_axel_workframe[env_ids_for_reset, :] = to_torch(
+            self.default_pivot_axel,
+            dtype=torch.float,
+            device=self.device
+        ).repeat((num_envs_to_reset, 1))
+
         # randomise direction of pivot axel
-        if self.randomize and self.rand_pivot_axel:
-            # self.pivot_axel_workframe[env_ids_for_reset, :] = torch_random_dir(
-            #     num_envs_to_reset,
-            #     device=self.device
-            # )
-            self.pivot_axel_workframe[env_ids_for_reset, :] = torch_random_cardinal_dir(
-                num_envs_to_reset,
-                device=self.device
-            )
-        else:
-            self.pivot_axel_workframe[env_ids_for_reset, :] = to_torch(
-                [0.0, 0.0, 1.0],
-                dtype=torch.float,
-                device=self.device
-            ).repeat((num_envs_to_reset, 1))
+        if self.randomize:
+            if self.rand_pivot_axel == 'full_rand':
+                self.pivot_axel_workframe[env_ids_for_reset, :] = torch_random_dir(
+                    num_envs_to_reset,
+                    device=self.device
+                )
+            elif self.rand_pivot_axel == 'cardinal':
+                self.pivot_axel_workframe[env_ids_for_reset, :] = torch_random_cardinal_dir(
+                    num_envs_to_reset,
+                    device=self.device
+                )
 
         self.pivot_axel_worldframe[env_ids_for_reset, :] = quat_rotate(
             pivot_point_orn, self.pivot_axel_workframe[env_ids_for_reset, :])

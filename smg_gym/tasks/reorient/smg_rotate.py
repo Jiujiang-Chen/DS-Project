@@ -3,7 +3,7 @@ Train:
 python train.py task=smg_rotate headless=True
 
 Test:
-python train.py task=smg_rotate test=True task.env.numEnvs=8 headless=False checkpoint=runs/smg_rotate/nn/smg_rotate.pth
+python train.py task=smg_rotate test=True task.env.num_envs=8 headless=False checkpoint=runs/smg_rotate/nn/smg_rotate.pth
 """
 import torch
 

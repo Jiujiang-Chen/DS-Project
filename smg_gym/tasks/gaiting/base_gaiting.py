@@ -26,20 +26,22 @@ class BaseGaiting(BaseShadowModularGrasper):
     ):
         # target vars
         self.rotate_increment_degrees = cfg["env"]["rotateIncrementDegrees"]
+        default_pivot_axel = np.array(cfg["env"]["default_pivot_axel"])
+        self.default_pivot_axel = default_pivot_axel/np.linalg.norm(default_pivot_axel)
 
         # reward / termination vars
-        self.reward_type = cfg["env"]["rewardType"]
-        self.max_episode_length = cfg["env"]["episodeLength"]
+        self.reward_type = cfg["env"]["reward_type"]
+        self.max_episode_length = cfg["env"]["episode_length"]
 
         if self.reward_type not in ["hybrid", "keypoint"]:
             raise ValueError('Incorrect reward mode specified.')
 
         # randomisation params
-        self.randomize = cfg["task"]["randomize"]
-        self.rand_hand_joints = cfg["task"]["randHandJoints"]
-        self.rand_obj_init_orn = cfg["task"]["randObjInitOrn"]
-        self.rand_pivot_pos = cfg["task"]["randPivotPos"]
-        self.rand_pivot_axel = cfg["task"]["randPivotAxel"]
+        self.randomize = cfg["rand_params"]["randomize"]
+        self.rand_hand_joints = cfg["rand_params"]["rand_hand_joints"]
+        self.rand_obj_init_orn = cfg["rand_params"]["rand_obj_init_orn"]
+        self.rand_pivot_pos = cfg["rand_params"]["rand_pivot_pos"]
+        self.rand_pivot_axel = cfg["rand_params"]["rand_pivot_axel"]
 
         super(BaseGaiting, self).__init__(
             cfg,
@@ -159,19 +161,19 @@ class BaseGaiting(BaseShadowModularGrasper):
         """
 
         # fill obs buffer with observations shared across tasks.
-        obs_cfg = self.cfg["enabledObs"]
+        obs_cfg = self.cfg["enabled_obs"]
         start_offset, end_offset = self.standard_fill_buffer(self.obs_buf, obs_cfg)
 
         # target pivot axel vec
         start_offset = end_offset
         end_offset = start_offset + 3
-        if obs_cfg["pivotAxelVec"]:
+        if obs_cfg["pivot_axel_vec"]:
             self.obs_buf[:, start_offset:end_offset] = self.pivot_axel_workframe
 
         # target pivot axel pos
         start_offset = end_offset
         end_offset = start_offset + 3
-        if obs_cfg["pivotAxelPos"]:
+        if obs_cfg["pivot_axel_pos"]:
             self.obs_buf[:, start_offset:end_offset] = self.pivot_point_pos_offset
 
         return self.obs_buf
@@ -182,23 +184,23 @@ class BaseGaiting(BaseShadowModularGrasper):
         shape = (num_envs, num_obs)
         """
         # if states spec is empty then return
-        if not self.cfg["asymmetricObs"]:
+        if not self.cfg["asymmetric_obs"]:
             return
 
         # fill obs buffer with observations shared across tasks.
-        states_cfg = self.cfg["enabledStates"]
+        states_cfg = self.cfg["enabled_states"]
         start_offset, end_offset = self.standard_fill_buffer(self.states_buf, states_cfg)
 
         # target pivot axel vec
         start_offset = end_offset
         end_offset = start_offset + 3
-        if states_cfg["pivotAxelVec"]:
+        if states_cfg["pivot_axel_vec"]:
             self.states_buf[:, start_offset:end_offset] = self.pivot_axel_workframe
 
         # target pivot axel pos
         start_offset = end_offset
         end_offset = start_offset + 3
-        if states_cfg["pivotAxelPos"]:
+        if states_cfg["pivot_axel_pos"]:
             self.states_buf[:, start_offset:end_offset] = self.pivot_point_pos_offset
 
         return self.states_buf
@@ -234,20 +236,20 @@ class BaseGaiting(BaseShadowModularGrasper):
                 obj_base_orn=self.obj_base_orn,
                 targ_base_pos=self.goal_base_pos - self.goal_displacement_tensor,
                 targ_base_orn=self.goal_base_orn,
-                actions=self.actions,
+                actions=self.action_buf,
                 n_tip_contacts=self.n_tip_contacts,
-                dist_reward_scale=self.cfg["env"]["distRewardScale"],
-                rot_reward_scale=self.cfg["env"]["rotRewardScale"],
-                rot_eps=self.cfg["env"]["rotEps"],
-                success_tolerance=self.cfg["env"]["rotSuccessTolerance"],
-                max_episode_length=self.cfg["env"]["episodeLength"],
-                fall_reset_dist=self.cfg["env"]["fallResetDist"],
-                require_contact=self.cfg["env"]["requireContact"],
-                contact_reward_scale=self.cfg["env"]["contactRewardScale"],
-                action_penalty_scale=self.cfg["env"]["actionPenaltyScale"],
-                reach_goal_bonus=self.cfg["env"]["reachGoalBonus"],
-                fall_penalty=self.cfg["env"]["fallPenalty"],
-                av_factor=self.cfg["env"]["avFactor"],
+                dist_reward_scale=self.cfg["env"]["dist_reward_scale"],
+                rot_reward_scale=self.cfg["env"]["rot_reward_scale"],
+                rot_eps=self.cfg["env"]["rot_eps"],
+                success_tolerance=self.cfg["env"]["rot_success_tolerance"],
+                max_episode_length=self.cfg["env"]["episode_length"],
+                fall_reset_dist=self.cfg["env"]["fall_reset_dist"],
+                require_contact=self.cfg["env"]["require_contact"],
+                contact_reward_scale=self.cfg["env"]["contact_reward_scale"],
+                action_penalty_scale=self.cfg["env"]["action_penalty_scale"],
+                reach_goal_bonus=self.cfg["env"]["reach_goal_bonus"],
+                fall_penalty=self.cfg["env"]["fall_penalty"],
+                av_factor=self.cfg["env"]["av_factor"],
             )
 
         # trifinger - keypoint distance reward
@@ -268,20 +270,20 @@ class BaseGaiting(BaseShadowModularGrasper):
                 consecutive_successes=self.consecutive_successes,
                 obj_kps=centered_obj_kp_pos,
                 goal_kps=centered_goal_kp_pos,
-                actions=self.actions,
+                actions=self.action_buf,
                 n_tip_contacts=self.n_tip_contacts,
-                lgsk_scale=self.cfg["env"]["lgskScale"],
-                lgsk_eps=self.cfg["env"]["lgskEps"],
-                kp_dist_scale=self.cfg["env"]["kpDistScale"],
-                success_tolerance=self.cfg["env"]["kpSuccessTolerance"],
-                max_episode_length=self.cfg["env"]["episodeLength"],
-                fall_reset_dist=self.cfg["env"]["fallResetDist"],
-                require_contact=self.cfg["env"]["requireContact"],
-                contact_reward_scale=self.cfg["env"]["contactRewardScale"],
-                action_penalty_scale=self.cfg["env"]["actionPenaltyScale"],
-                reach_goal_bonus=self.cfg["env"]["reachGoalBonus"],
-                fall_penalty=self.cfg["env"]["fallPenalty"],
-                av_factor=self.cfg["env"]["avFactor"],
+                lgsk_scale=self.cfg["env"]["lgsk_scale"],
+                lgsk_eps=self.cfg["env"]["lgsk_eps"],
+                kp_dist_scale=self.cfg["env"]["kp_dist_scale"],
+                success_tolerance=self.cfg["env"]["kp_success_tolerance"],
+                max_episode_length=self.cfg["env"]["episode_length"],
+                fall_reset_dist=self.cfg["env"]["fall_reset_dist"],
+                require_contact=self.cfg["env"]["require_contact"],
+                contact_reward_scale=self.cfg["env"]["contact_reward_scale"],
+                action_penalty_scale=self.cfg["env"]["action_penalty_scale"],
+                reach_goal_bonus=self.cfg["env"]["reach_goal_bonus"],
+                fall_penalty=self.cfg["env"]["fall_penalty"],
+                av_factor=self.cfg["env"]["av_factor"],
             )
 
         self.extras.update({"metrics/"+k: v.mean() for k, v in log_dict.items()})

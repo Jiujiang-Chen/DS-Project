@@ -3,7 +3,7 @@ Train:
 python train.py task=smg_reorient headless=True
 
 Test:
-python train.py task=smg_reorient task.env.numEnvs=8 test=True headless=False checkpoint=runs/smg_reorient/nn/smg_reorient.pth
+python train.py task=smg_reorient task.env.num_envs=8 test=True headless=False checkpoint=runs/smg_reorient/nn/smg_reorient.pth
 """
 from isaacgym.torch_utils import torch_rand_float
 

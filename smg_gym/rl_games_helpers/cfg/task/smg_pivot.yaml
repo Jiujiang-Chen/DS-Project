@@ -5,51 +5,51 @@ physics_engine: ${..physics_engine}
 
 # if given, will override the device setting in gym.
 env:
-  # numEnvs: 4
-  # numEnvs: 1024
-  numEnvs: 4096
-  # numEnvs: 16384
+  # num_envs: 4
+  # num_envs: 1024
+  num_envs: 4096
+  # num_envs: 16384
 
-  envSpacing: 0.5
-  enableDebugVis: True
+  env_spacing: 0.5
+  enable_debug_vis: True
 
   # env settings
-  objName: 'sphere'
-  # objName: 'cube'
-  # objName: 'icosahedron'
+  obj_name: 'sphere'
+  # obj_name: 'cube'
+  # obj_name: 'icosahedron'
 
   # action settings
   useRelativeControl: True
   dofSpeedScale: 10.0
   actionsMovingAverage: 1.0
-  controlFrequencyInv: 1
+  control_frequency_inv: 1
 
   # reward/termination
-  episodeLength: 1000
-  requireContact: True
-  contactRewardScale: 0.0
-  actionPenaltyScale: 0.0
-  avFactor: 0.01
-  reachGoalBonus: 250
-  fallResetDist: 0.15
-  fallPenalty: 0.0
+  episode_length: 1000
+  require_contact: True
+  contact_reward_scale: 0.0
+  action_penalty_scale: 0.0
+  av_factor: 0.01
+  reach_goal_bonus: 250
+  fall_reset_dist: 0.15
+  fall_penalty: 0.0
 
-  # rewardType: "hybrid"
-  distRewardScale: -10.0
-  rotRewardScale: 1.0
-  rotSuccessTolerance: 0.1
-  rotEps: 0.1
+  # reward_type: "hybrid"
+  dist_reward_scale: -10.0
+  rot_reward_scale: 1.0
+  rot_success_tolerance: 0.1
+  rot_eps: 0.1
 
-  rewardType: "keypoint"
-  kpSuccessTolerance: 0.02
-  lgskScale: 50.0
-  lgskEps: 2.0
-  kpDistScale: 10.0
+  reward_type: "keypoint"
+  kp_success_tolerance: 0.02
+  lgsk_scale: 50.0
+  lgsk_eps: 2.0
+  kp_dist_scale: 10.0
 
-task:
+rand_params:
   randomize: True
-  randHandJoints: True
-  randObjInitOrn: False
+  rand_hand_joints: True
+  rand_obj_init_orn: False
 
 sim:
   dt: 0.02 # 1/60

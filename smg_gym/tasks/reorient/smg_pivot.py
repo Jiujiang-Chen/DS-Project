@@ -3,7 +3,7 @@ Train:
 python train.py task=smg_pivot headless=True
 
 Test:
-python train.py task=smg_pivot task.env.numEnvs=8 test=True headless=False checkpoint=runs/smg_pivot/nn/smg_pivot.pth
+python train.py task=smg_pivot task.env.num_envs=8 test=True headless=False checkpoint=runs/smg_pivot/nn/smg_pivot.pth
 """
 
 import torch

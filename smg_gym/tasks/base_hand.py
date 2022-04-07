@@ -1,6 +1,8 @@
+from types import SimpleNamespace
 import numpy as np
 import os
 import torch
+import enum
 
 from isaacgym.torch_utils import unscale
 from isaacgym.torch_utils import quat_mul
@@ -9,20 +11,42 @@ from isaacgym.torch_utils import quat_rotate
 from isaacgym.torch_utils import to_torch
 from isaacgym.torch_utils import torch_rand_float
 from isaacgym.torch_utils import tensor_clamp
-from isaacgym.torch_utils import scale
-from isaacgymenvs.tasks.base.vec_task import VecTask
 from isaacgym import gymtorch
 from isaacgym import gymapi
 from isaacgym import gymutil
 
 from pybullet_object_models import primitive_objects as object_set
 
+from smg_gym.tasks.base_vec_task import VecTask
 from smg_gym.utils.torch_jit_utils import randomize_rotation
+from smg_gym.utils.torch_jit_utils import saturate
+from smg_gym.utils.torch_jit_utils import scale_transform
+from smg_gym.utils.torch_jit_utils import unscale_transform
+
 from smg_gym.utils.draw_utils import get_sphere_geom
 from smg_gym.assets import add_assets_path
 
+from smg_gym.tasks.smg_object_task_params import robot_limits
+from smg_gym.tasks.smg_object_task_params import object_limits
+from smg_gym.tasks.smg_object_task_params import target_limits
+from smg_gym.tasks.smg_object_task_params import robot_dof_gains
+
 
 class BaseShadowModularGrasper(VecTask):
+
+    # limits of the robot (mapped later: str -> torch.tensor)
+    _robot_limits = robot_limits
+
+    # limits of the object (mapped later: str -> torch.tensor)
+    _object_limits = object_limits
+
+    # limits of the target (mapped later: str -> torch.tensor)
+    _target_limits = target_limits
+
+    # PD gains for the robot (mapped later: str -> torch.tensor)
+    # Ref: https://github.com/rr-learning/rrc_simulation/blob/master/python/rrc_simulation/sim_finger.py#L49-L65
+    _robot_dof_gains = robot_dof_gains
+
     def __init__(
         self,
         cfg,
@@ -33,14 +57,11 @@ class BaseShadowModularGrasper(VecTask):
 
         # setup params
         self.cfg = cfg
-        self.debug_viz = cfg["env"]["enableDebugVis"]
-        self.env_spacing = cfg["env"]["envSpacing"]
-        self.obj_name = cfg["env"]["objName"]
+        self.debug_viz = cfg["env"]["enable_debug_vis"]
+        self.env_spacing = cfg["env"]["env_spacing"]
+        self.obj_name = cfg["env"]["obj_name"]
 
         # action params
-        self.use_relative_control = cfg["env"]["useRelativeControl"]
-        self.dof_speed_scale = cfg["env"]["dofSpeedScale"]
-        self.act_moving_average = cfg["env"]["actionsMovingAverage"]
 
         super().__init__(config=cfg, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless)
 
@@ -49,6 +70,50 @@ class BaseShadowModularGrasper(VecTask):
             cam_pos = gymapi.Vec3(2, 2, 2)
             cam_target = gymapi.Vec3(0, 0, 1)
             self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
+
+        # initialize the buffers
+        self._setup_tensors()
+
+        # set the mdp spaces
+        self.__setup_mdp_spaces()
+
+        # get indices useful for tracking contacts and fingertip positions
+        self._setup_fingertip_tracking()
+        self._setup_contact_tracking()
+
+        # refresh all tensors
+        self.refresh_tensors()
+
+    def _setup_tensors(self):
+        """
+        Allocate memory to various buffers.
+        """
+        # change constant buffers from numpy/lists into torch tensors
+        # limits for robot
+        for limit_name in self._robot_limits:
+            # extract limit simple-namespace
+            limit_dict = self._robot_limits[limit_name].__dict__
+            # iterate over namespace attributes
+            for prop, value in limit_dict.items():
+                limit_dict[prop] = torch.tensor(value, dtype=torch.float, device=self.device)
+
+        for limit_name in self._object_limits:
+            # extract limit simple-namespace
+            limit_dict = self._object_limits[limit_name].__dict__
+            # iterate over namespace attributes
+            for prop, value in limit_dict.items():
+                limit_dict[prop] = torch.tensor(value, dtype=torch.float, device=self.device)
+
+        for limit_name in self._target_limits:
+            # extract limit simple-namespace
+            limit_dict = self._target_limits[limit_name].__dict__
+            # iterate over namespace attributes
+            for prop, value in limit_dict.items():
+                limit_dict[prop] = torch.tensor(value, dtype=torch.float, device=self.device)
+
+        # PD gains for actuation
+        for gain_name, value in self._robot_dof_gains.items():
+            self._robot_dof_gains[gain_name] = torch.tensor(value, dtype=torch.float, device=self.device)
 
         # get state tensors
         actor_root_state_tensor = self.gym.acquire_actor_root_state_tensor(self.sim)
@@ -90,39 +155,115 @@ class BaseShadowModularGrasper(VecTask):
         self.total_successes = 0
         self.total_resets = 0
 
-        # get indices useful for contacts
-        self._setup_fingertip_tracking()
-        self._setup_contact_tracking()
-
-        # refresh all tensors
-        self.refresh_tensors()
-
-    def allocate_buffers(self):
-        """Allocate the observation, states, etc. buffers.
-
-        These are what is used to set observations and states in the environment classes which
-        inherit from this one, and are read in `step` and other related functions.
-
+    def __setup_mdp_spaces(self):
+        """
+        Configures the observations, state and action spaces.
         """
 
-        # allocate buffers
-        self.obs_buf = torch.zeros(
-            (self.num_envs, self.num_obs), device=self.device, dtype=torch.float)
-        self.states_buf = torch.zeros(
-            (self.num_envs, self.num_states), device=self.device, dtype=torch.float)
-        self.action_buf = torch.zeros(
-            (self.num_envs, self.num_actions), device=self.device, dtype=torch.float)
-        self.rew_buf = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.float)
-        self.reset_buf = torch.ones(
-            self.num_envs, device=self.device, dtype=torch.long)
-        self.timeout_buf = torch.zeros(
-             self.num_envs, device=self.device, dtype=torch.long)
-        self.progress_buf = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.long)
-        self.randomize_buf = torch.zeros(
-            self.num_envs, device=self.device, dtype=torch.long)
-        self.extras = {}
+        # Action scale for the MDP
+        # Note: This is order sensitive.
+        if self.cfg["env"]["command_mode"] == "position":
+            # action space is joint positions
+            self._action_scale.low = self._robot_limits["joint_position"].low
+            self._action_scale.high = self._robot_limits["joint_position"].high
+
+        elif self.cfg["env"]["command_mode"] == "torque":
+            # action space is joint torques
+            self._action_scale.low = self._robot_limits["joint_torque"].low
+            self._action_scale.high = self._robot_limits["joint_torque"].high
+
+        else:
+            msg = f"Invalid command mode. Input: {self.cfg['env']['command_mode']} not in ['torque', 'position']."
+            raise ValueError(msg)
+
+        # Observations scale for the MDP
+        # check if policy outputs normalized action [-1, 1] or not.
+        if self.cfg["env"]["normalize_action"]:
+            obs_action_scale = SimpleNamespace(
+                low=torch.full((self.num_actions,), -1, dtype=torch.float, device=self.device),
+                high=torch.full((self.num_actions,), 1, dtype=torch.float, device=self.device)
+            )
+        else:
+            obs_action_scale = self._action_scale
+
+        # Note: This is order sensitive.
+        self._observations_scale.low = torch.cat([
+            # robot
+            self._robot_limits["joint_position"].low,
+            self._robot_limits["joint_velocity"].low,
+            self._robot_limits["fingertip_position"].low,
+            self._robot_limits["fingertip_orientation"].low,
+
+            # action
+            obs_action_scale.low,
+
+            # tactile
+            self._robot_limits["bool_tip_contacts"].low,
+            self._robot_limits["tip_contact_forces"].low,
+
+            # object
+            self._object_limits["position"].low,
+            self._object_limits["orientation"].low,
+            self._object_limits["keypoint_position"].low,
+            self._object_limits["linear_velocity"].low,
+            self._object_limits["angular_velocity"].low,
+
+            # target
+            self._object_limits["position"].low,
+            self._object_limits["orientation"].low,
+            self._object_limits["keypoint_position"].low,
+            self._target_limits["active_quat"].low,
+            self._target_limits["pivot_axel_vector"].low,
+            self._target_limits["pivot_axel_position"].low,
+        ])
+
+        self._observations_scale.high = torch.cat([
+            # robot
+            self._robot_limits["joint_position"].high,
+            self._robot_limits["joint_velocity"].high,
+            self._robot_limits["fingertip_position"].high,
+            self._robot_limits["fingertip_orientation"].high,
+
+            # action
+            obs_action_scale.high,
+
+            # tactile
+            self._robot_limits["bool_tip_contacts"].high,
+            self._robot_limits["tip_contact_forces"].high,
+
+            # object
+            self._object_limits["position"].high,
+            self._object_limits["orientation"].high,
+            self._object_limits["keypoint_position"].high,
+            self._object_limits["linear_velocity"].high,
+            self._object_limits["angular_velocity"].high,
+
+            # target
+            self._object_limits["position"].high,
+            self._object_limits["orientation"].high,
+            self._object_limits["keypoint_position"].high,
+            self._target_limits["active_quat"].high,
+            self._target_limits["pivot_axel_vector"].high,
+            self._target_limits["pivot_axel_position"].high,
+        ])
+
+        # check that dimensions match
+        # observations
+        if self._observations_scale.low.shape[0] != self.num_obs or self._observations_scale.high.shape[0] != self.num_obs:
+            msg = f"Observation scaling dimensions mismatch. " \
+                  f"\tLow: {self._observations_scale.low.shape[0]}, " \
+                  f"\tHigh: {self._observations_scale.high.shape[0]}, " \
+                  f"\tExpected: {self.num_obs}."
+            raise AssertionError(msg)
+
+        # actions
+        if self._action_scale.low.shape[0] != self.num_actions or self._action_scale.high.shape[0] != self.num_actions:
+            msg = f"Actions scaling dimensions mismatch. " \
+                  f"\tLow: {self._action_scale.low.shape[0]}, " \
+                  f"\tHigh: {self._action_scale.high.shape[0]}, " \
+                  f"\tExpected: {self.num_actions}."
+
+            raise AssertionError(msg)
 
     def create_sim(self):
         self.dt = self.sim_params.dt
@@ -462,14 +603,14 @@ class BaseShadowModularGrasper(VecTask):
 
         return net_tip_contact_forces, tip_object_contacts, n_tip_contacts
 
-    def pre_physics_step(self, actions):
+    def pre_physics_step(self):
         """Apply the actions to the environment (eg by setting torques, position targets).
 
         Args:
             actions: the actions to apply
         """
         self.apply_resets()
-        self.apply_actions(actions)
+        self.apply_actions()
 
     def post_physics_step(self):
         """Compute reward and observations, reset any environments that require it."""
@@ -479,6 +620,7 @@ class BaseShadowModularGrasper(VecTask):
         self.compute_observations()
         self.fill_observation_buffer()
         self.fill_states_buffer()
+        self.norm_obs_state_buffer()
         self.compute_reward_and_termination()
 
         if self.viewer and self.debug_viz:
@@ -504,103 +646,119 @@ class BaseShadowModularGrasper(VecTask):
         # joint position
         start_offset = 0
         end_offset = start_offset + 9
-        if buf_cfg["jointPos"]:
+        if buf_cfg["joint_pos"]:
             buf[:, start_offset:end_offset] = unscale(
                 self.hand_joint_pos, self.hand_dof_lower_limits, self.hand_dof_upper_limits)
 
         # joint velocity
         start_offset = end_offset
         end_offset = start_offset + 9
-        if buf_cfg["jointVel"]:
+        if buf_cfg["joint_vel"]:
             buf[:, start_offset:end_offset] = self.hand_joint_vel
 
         # fingertip positions
         start_offset = end_offset
         end_offset = start_offset + 9
-        if buf_cfg["fingertipPos"]:
+        if buf_cfg["fingertip_pos"]:
             buf[:, start_offset:end_offset] = self.fingertip_pos
 
         # fingertip orn
         start_offset = end_offset
         end_offset = start_offset + 12
-        if buf_cfg["fingertipOrn"]:
+        if buf_cfg["fingertip_orn"]:
             buf[:, start_offset:end_offset] = self.fingertip_orn.reshape(self.num_envs, self.n_tips*4)
 
         # latest actions
         start_offset = end_offset
         end_offset = start_offset + 9
-        if buf_cfg["lastAction"]:
-            buf[:, start_offset:end_offset] = self.actions
+        if buf_cfg["last_action"]:
+            buf[:, start_offset:end_offset] = self.action_buf
 
         # boolean tips in contacts
         start_offset = end_offset
         end_offset = start_offset + 3
-        if buf_cfg["boolTipContacts"]:
+        if buf_cfg["bool_tip_contacts"]:
             buf[:, start_offset:end_offset] = self.tip_object_contacts
 
         # tip contact forces
         start_offset = end_offset
         end_offset = start_offset + 9
-        if buf_cfg["tipContactForces"]:
+        if buf_cfg["tip_contact_forces"]:
             buf[:, start_offset:end_offset] = self.net_tip_contact_forces.reshape(self.num_envs, self.n_tips*3)
 
         # object position
         start_offset = end_offset
         end_offset = start_offset + 3
-        if buf_cfg["objectPos"]:
+        if buf_cfg["object_pos"]:
             buf[:, start_offset:end_offset] = self.obj_base_pos
 
         # object orientation
         start_offset = end_offset
         end_offset = start_offset + 4
-        if buf_cfg["objectOrn"]:
+        if buf_cfg["object_orn"]:
             buf[:, start_offset:end_offset] = self.obj_base_orn
 
         # object keypoints
         start_offset = end_offset
         end_offset = start_offset + self.n_keypoints*3
-        if buf_cfg["objectKPs"]:
+        if buf_cfg["object_kps"]:
             buf[:, start_offset:end_offset] = (self.obj_kp_positions
                                                - self.obj_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
 
         # object linear velocity
         start_offset = end_offset
         end_offset = start_offset + 3
-        if buf_cfg["objectLinVel"]:
+        if buf_cfg["object_linvel"]:
             buf[:, start_offset:end_offset] = self.obj_base_linvel
 
         # object angular velocity
         start_offset = end_offset
         end_offset = start_offset + 3
-        if buf_cfg["objectAngVel"]:
+        if buf_cfg["object_angvel"]:
             buf[:, start_offset:end_offset] = self.obj_base_angvel
 
         # goal position
         start_offset = end_offset
         end_offset = start_offset + 3
-        if buf_cfg["GoalPos"]:
+        if buf_cfg["goal_pos"]:
             buf[:, start_offset:end_offset] = self.goal_base_pos
 
         # goal orientation
         start_offset = end_offset
         end_offset = start_offset + 4
-        if buf_cfg["GoalOrn"]:
+        if buf_cfg["goal_orn"]:
             buf[:, start_offset:end_offset] = self.goal_base_orn
 
         # goal keypoints
         start_offset = end_offset
         end_offset = start_offset + self.n_keypoints*3
-        if buf_cfg["GoalKPs"]:
+        if buf_cfg["goal_kps"]:
             buf[:, start_offset:end_offset] = (self.goal_kp_positions
                                                - self.goal_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
 
         # active quat between goal and object
         start_offset = end_offset
         end_offset = start_offset + 4
-        if buf_cfg["activeQuat"]:
+        if buf_cfg["active_quat"]:
             self.obs_buf[:, start_offset:end_offset] = quat_mul(self.obj_base_orn, quat_conjugate(self.goal_base_orn))
 
         return start_offset, end_offset
+
+    def norm_obs_state_buffer(self):
+        if self.cfg["normalize_obs"]:
+            # for normal obs
+            self._obs_buf = scale_transform(
+                self.obs_buf,
+                lower=self._observations_scale.low,
+                upper=self._observations_scale.high
+            )
+            # for asymmetric obs
+            if self.cfg["asymmetric_obs"]:
+                self._states_buf = scale_transform(
+                    self.states_buf,
+                    lower=self._observations_scale.low,
+                    upper=self._observations_scale.high
+                )
 
     def compute_reward_and_termination(self):
         """
@@ -722,35 +880,73 @@ class BaseShadowModularGrasper(VecTask):
         self.reset_buf[env_ids_for_reset] = 0
         self.successes[env_ids_for_reset] = 0
 
-    def apply_actions(self, actions):
-        self.actions = actions.clone().to(self.device)
+    def apply_actions_v2(self):
+        """
+        Setting of input actions into simulator before performing the physics simulation step.
 
-        if self.use_relative_control:
-            targets = self.prev_targets[:, self.control_joint_dof_indices] + self.dof_speed_scale * self.dt * self.actions
+        @note The input actions are read from the action buffer variable `_action_buf`.
+        """
 
-            self.cur_targets[:, self.control_joint_dof_indices] = tensor_clamp(
-                targets,
-                self.hand_dof_lower_limits[self.control_joint_dof_indices],
-                self.hand_dof_upper_limits[self.control_joint_dof_indices],
+        # self.action_buf = torch.ones_like(self.action_buf)
+        # self.action_buf = torch.ones_like(self.action_buf) * -1
+
+        # if normalized_action is true, then denormalize them.
+        if self.cfg["env"]["normalize_action"]:
+            action_transformed = unscale_transform(
+                self.action_buf,
+                lower=self._action_scale.low,
+                upper=self._action_scale.high
             )
         else:
+            action_transformed = self._action_buf
 
-            self.cur_targets[:, self.control_joint_dof_indices] = scale(
-                self.actions,
-                self.hand_dof_lower_limits[self.control_joint_dof_indices],
-                self.hand_dof_upper_limits[self.control_joint_dof_indices],
+        # compute command on the basis of mode selected
+        if self.cfg["env"]["command_mode"] == 'torque':
+            # command is the desired joint torque
+            computed_torque = action_transformed
+
+        elif self.cfg["env"]["command_mode"] == 'position':
+            # command is the desired joint positions
+            desired_dof_position = action_transformed
+            # compute torque to apply
+            computed_torque = self._robot_dof_gains["stiffness"] * (desired_dof_position - self.dof_pos)
+            computed_torque -= self._robot_dof_gains["damping"] * self.dof_vel
+
+        else:
+            msg = f"Invalid command mode. Input: {self.cfg['env']['command_mode']} not in ['torque', 'position']."
+            raise ValueError(msg)
+
+        # apply clamping of computed torque to actuator limits
+        applied_torque = saturate(
+            computed_torque,
+            lower=self._robot_limits["joint_torque"].low,
+            upper=self._robot_limits["joint_torque"].high
+        )
+
+        # apply safety damping and clamping of the action torque if enabled
+        if self.cfg["env"]["apply_safety_damping"]:
+            # apply damping by joint velocity
+            applied_torque -= self._robot_dof_gains["safety_damping"] * self._dof_velocity
+            # clamp input
+            applied_torque = saturate(
+                applied_torque,
+                lower=self._robot_limits["joint_torque"].low,
+                upper=self._robot_limits["joint_torque"].high
             )
 
-            self.cur_targets[:, self.control_joint_dof_indices] = (
-                self.act_moving_average * self.cur_targets[:, self.control_joint_dof_indices]
-                + (1.0 - self.act_moving_average) * self.prev_targets[:, self.control_joint_dof_indices]
-            )
+        # set computed torques to simulator buffer.
+        self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(applied_torque))
 
-            self.cur_targets[:, self.control_joint_dof_indices] = tensor_clamp(
-                self.cur_targets[:, self.control_joint_dof_indices],
-                self.hand_dof_lower_limits[self.control_joint_dof_indices],
-                self.hand_dof_upper_limits[self.control_joint_dof_indices],
-            )
+    def apply_actions(self):
+
+        dof_speed_scale = 10.0
+        targets = self.prev_targets[:, self.control_joint_dof_indices] + dof_speed_scale * self.dt * self.action_buf
+
+        self.cur_targets[:, self.control_joint_dof_indices] = tensor_clamp(
+            targets,
+            self.hand_dof_lower_limits[self.control_joint_dof_indices],
+            self.hand_dof_upper_limits[self.control_joint_dof_indices],
+        )
 
         self.prev_targets[:, self.control_joint_dof_indices] = self.cur_targets[:, self.control_joint_dof_indices]
         self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.cur_targets))
@@ -834,53 +1030,3 @@ class BaseShadowModularGrasper(VecTask):
                     self.envs[i],
                     pose
                 )
-
-    """
-    Properties
-    """
-
-    def get_gravity(self) -> np.ndarray:
-        """Returns the gravity set in the simulator.
-        """
-        gravity = self.sim_params.gravity
-        return np.asarray([gravity.x, gravity.y, gravity.z])
-
-    def get_sim_params(self) -> gymapi.SimParams:
-        """Returns the simulator physics parameters.
-        """
-        return self.sim_params
-
-    def get_state_shape(self) -> torch.Size:
-        """Returns the size of the state buffer: [num. instances, num. of state]
-        """
-        return self.states_buf.size()
-
-    def get_obs_shape(self) -> torch.Size:
-        """Returns the size of the observation buffer: [num. instances, num. of obs]
-        """
-        return self.obs_buf.size()
-
-    def get_action_shape(self) -> torch.Size:
-        """Returns the size of the action buffer: [num. instances, num. of action]
-        """
-        return self.action_buf.size()
-
-    def get_num_envs(self) -> int:
-        """Returns number of environment instances
-        """
-        return self.num_envs
-
-    def get_state_dim(self) -> int:
-        """Returns imensions of state specfication.
-        """
-        return self.get_state_shape()[1]
-
-    def get_obs_dim(self) -> int:
-        """Returns imensions of obs specfication.
-        """
-        return self.get_obs_shape()[1]
-
-    def get_action_dim(self) -> int:
-        """Returns imensions of action specfication.
-        """
-        return self.get_action_shape()[1]

@@ -14,6 +14,66 @@ from isaacgym.torch_utils import torch_rand_float
 
 
 @torch.jit.script
+def scale_transform(x: torch.Tensor, lower: torch.Tensor, upper: torch.Tensor) -> torch.Tensor:
+    """
+    Normalizes a given input tensor to a range of [-1, 1].
+
+    @note It uses pytorch broadcasting functionality to deal with batched input.
+
+    Args:
+        x: Input tensor of shape (N, dims).
+        lower: The minimum value of the tensor. Shape (dims,)
+        upper: The maximum value of the tensor. Shape (dims,)
+
+    Returns:
+        Normalized transform of the tensor. Shape (N, dims)
+    """
+    # default value of center
+    offset = (lower + upper) * 0.5
+    # return normalized tensor
+    return 2 * (x - offset) / (upper - lower)
+
+
+@torch.jit.script
+def unscale_transform(x: torch.Tensor, lower: torch.Tensor, upper: torch.Tensor) -> torch.Tensor:
+    """
+    Denormalizes a given input tensor from range of [-1, 1] to (lower, upper).
+
+    @note It uses pytorch broadcasting functionality to deal with batched input.
+
+    Args:
+        x: Input tensor of shape (N, dims).
+        lower: The minimum value of the tensor. Shape (dims,)
+        upper: The maximum value of the tensor. Shape (dims,)
+
+    Returns:
+        Denormalized transform of the tensor. Shape (N, dims)
+    """
+    # default value of center
+    offset = (lower + upper) * 0.5
+    # return normalized tensor
+    return x * (upper - lower) * 0.5 + offset
+
+
+@torch.jit.script
+def saturate(x: torch.Tensor, lower: torch.Tensor, upper: torch.Tensor) -> torch.Tensor:
+    """
+    Clamps a given input tensor to (lower, upper).
+
+    @note It uses pytorch broadcasting functionality to deal with batched input.
+
+    Args:
+        x: Input tensor of shape (N, dims).
+        lower: The minimum value of the tensor. Shape (dims,)
+        upper: The maximum value of the tensor. Shape (dims,)
+
+    Returns:
+        Clamped transform of the tensor. Shape (N, dims)
+    """
+    return torch.max(torch.min(x, upper), lower)
+
+
+@torch.jit.script
 def randomize_rotation(rand0, rand1, x_unit_tensor, y_unit_tensor):
     return quat_mul(quat_from_angle_axis(rand0 * np.pi, x_unit_tensor),
                     quat_from_angle_axis(rand1 * np.pi, y_unit_tensor))
