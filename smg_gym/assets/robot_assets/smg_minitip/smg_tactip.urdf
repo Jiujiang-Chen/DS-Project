@@ -249,7 +249,7 @@
     <axis xyz="0 0 1"/>
     <parent link="SMG_F1_palm_link"/>
     <child link="SMG_F1_base_link"/>
-    <limit effort="50" lower="-0.785398163397" upper="0.785398163397" velocity="1.0"/>
+    <limit effort="1000" lower="-0.785398163397" upper="0.785398163397" velocity="1000"/>
     <!-- <dynamics damping="0.5" friction="0.0"/> -->
   </joint>
 
@@ -258,7 +258,7 @@
     <axis xyz="1 0 0"/>
     <parent link="SMG_F1_base_link"/>
     <child link="SMG_F1_link_1"/>
-    <limit effort="50" lower="-1.3962634016" upper="1.0471975512" velocity="1.0"/>
+    <limit effort="1000" lower="-1.3962634016" upper="1.0471975512" velocity="1000"/>
     <!-- <dynamics damping="0.5" friction="0.0"/> -->
   </joint>
 
@@ -267,7 +267,7 @@
     <axis xyz="1 0 0"/>
     <parent link="SMG_F1_link_1"/>
     <child link="SMG_F1_link_2"/>
-    <limit effort="50" lower="-1.0471975512" upper="1.57079632679" velocity="1.0"/>
+    <limit effort="1000" lower="-1.0471975512" upper="1.3962634016" velocity="1000"/>
     <!-- <dynamics damping="0.5" friction="0.0"/> -->
   </joint>
 
@@ -456,7 +456,7 @@
     <axis xyz="0 0 1"/>
     <parent link="SMG_F2_palm_link"/>
     <child link="SMG_F2_base_link"/>
-    <limit effort="30" lower="-0.785398163397" upper="0.785398163397" velocity="1.0"/>
+    <limit effort="1000" lower="-0.785398163397" upper="0.785398163397" velocity="1000"/>
     <!-- <dynamics damping="0.5" friction="0.0"/> -->
   </joint>
 
@@ -465,7 +465,7 @@
     <axis xyz="1 0 0"/>
     <parent link="SMG_F2_base_link"/>
     <child link="SMG_F2_link_1"/>
-    <limit effort="30" lower="-1.3962634016" upper="1.0471975512" velocity="1.0"/>
+    <limit effort="1000" lower="-1.3962634016" upper="1.0471975512" velocity="1000"/>
     <!-- <dynamics damping="0.5" friction="0.0"/> -->
   </joint>
 
@@ -474,7 +474,7 @@
     <axis xyz="1 0 0"/>
     <parent link="SMG_F2_link_1"/>
     <child link="SMG_F2_link_2"/>
-    <limit effort="30" lower="-1.0471975512" upper="1.57079632679" velocity="1.0"/>
+    <limit effort="1000" lower="-1.0471975512" upper="1.3962634016" velocity="1000"/>
     <!-- <dynamics damping="0.5" friction="0.0"/> -->
   </joint>
 
@@ -665,7 +665,7 @@
     <axis xyz="0 0 1"/>
     <parent link="SMG_F3_palm_link"/>
     <child link="SMG_F3_base_link"/>
-    <limit effort="30" lower="-0.785398163397" upper="0.785398163397" velocity="1.0"/>
+    <limit effort="1000" lower="-0.785398163397" upper="0.785398163397" velocity="1000"/>
     <!-- <dynamics damping="0.5" friction="0.0"/> -->
   </joint>
 
@@ -674,7 +674,7 @@
     <axis xyz="1 0 0"/>
     <parent link="SMG_F3_base_link"/>
     <child link="SMG_F3_link_1"/>
-    <limit effort="30" lower="-1.3962634016" upper="1.0471975512" velocity="1.0"/>
+    <limit effort="1000" lower="-1.3962634016" upper="1.0471975512" velocity="1000"/>
     <!-- <dynamics damping="0.5" friction="0.0"/> -->
   </joint>
 
@@ -683,7 +683,7 @@
     <axis xyz="1 0 0"/>
     <parent link="SMG_F3_link_1"/>
     <child link="SMG_F3_link_2"/>
-    <limit effort="30" lower="-1.0471975512" upper="1.57079632679" velocity="1.0"/>
+    <limit effort="1000" lower="-1.0471975512" upper="1.3962634016" velocity="1000"/>
     <!-- <dynamics damping="0.5" friction="0.0"/> -->
   </joint>
 

@@ -166,13 +166,13 @@ class BaseGaiting(BaseShadowModularGrasper):
 
         # target pivot axel vec
         start_offset = end_offset
-        end_offset = start_offset + 3
+        end_offset = start_offset + self._dims.VecDim.value
         if obs_cfg["pivot_axel_vec"]:
             self.obs_buf[:, start_offset:end_offset] = self.pivot_axel_workframe
 
         # target pivot axel pos
         start_offset = end_offset
-        end_offset = start_offset + 3
+        end_offset = start_offset + self._dims.PosDim.value
         if obs_cfg["pivot_axel_pos"]:
             self.obs_buf[:, start_offset:end_offset] = self.pivot_point_pos_offset
 

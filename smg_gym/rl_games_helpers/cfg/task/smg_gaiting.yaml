@@ -7,13 +7,12 @@ physics_engine: ${..physics_engine}
 env:
   # num_envs: 4
   # num_envs: 1024
-  num_envs: 4096
-  # num_envs: 8192
+  # num_envs: 4096
+  num_envs: 8192
   # num_envs: 16384
 
   env_spacing: 0.5
   enable_debug_vis: True
-
 
   # env settings
   obj_name: 'sphere'
@@ -25,10 +24,12 @@ env:
   clip_actions: 1.0
 
   # action settings
+  use_sim_pd_control: True
+  dof_speed_scale: 10.0
+
   normalize_action: True
-  command_mode: 'torque'
-  # command_mode: 'position'
-  apply_safety_damping: False
+  command_mode: 'position'
+  # command_mode: 'torque'
   control_frequency_inv: 2
 
   # shared reward/termination
@@ -66,10 +67,10 @@ normalize_obs: False
 asymmetric_obs: False
 enabled_obs:
     joint_pos: True
-    joint_vel: False
+    joint_vel: True
     fingertip_pos: True
     fingertip_orn: True
-    last_action: False
+    last_action: True
     bool_tip_contacts: True
     tip_contact_forces: True
     object_pos: True

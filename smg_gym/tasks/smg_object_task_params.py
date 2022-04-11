@@ -1,108 +1,134 @@
+import enum
 from types import SimpleNamespace
 import numpy as np
 
 
-# cartesian position + quaternion orientation
-PosDim = 3
-OrnDim = 4
-PoseDim = PosDim + OrnDim
+class SMGObjectTaskDimensions(enum.Enum):
 
-# linear velocity + angular velcoity
-LinearVelocityDim = 3
-AngularVelocityDim = 3
-VelocityDim = LinearVelocityDim + AngularVelocityDim
+    # cartesian position + quaternion orientation
+    PosDim = 3
+    OrnDim = 4
+    PoseDim = PosDim + OrnDim
 
-# state: pose + velocity
-StateDim = 13
+    # linear velocity + angular velcoity
+    LinearVelocityDim = 3
+    AngularVelocityDim = 3
+    VelocityDim = LinearVelocityDim + AngularVelocityDim
 
-# force + torque
-ForceDim = 3
-TorqueDim = 3
-WrenchDim = ForceDim + TorqueDim
+    # state: pose + velocity
+    StateDim = 13
 
-# for robot
-# number of fingers
-NumFingers = 3
+    # force + torque
+    ForceDim = 3
+    TorqueDim = 3
+    WrenchDim = ForceDim + TorqueDim
 
-# for three fingers
-JointPositionDim = 9
-JointVelocityDim = 9
-JointTorqueDim = 9
+    # number of fingers
+    NumFingers = 3
+    FingertipPosDim = PosDim * NumFingers
+    FingertipOrnDim = OrnDim * NumFingers
+    FingerContactForceDim = ForceDim * NumFingers
 
-# for object
-NumKeypoints = 6
-KeypointPositionDim = 3
+    # for three fingers
+    ActionDim = 9
+    JointPositionDim = 9
+    JointVelocityDim = 9
+    JointTorqueDim = 9
 
-# for target
-VecDim = 3
+    # for object
+    NumKeypoints = 6
+    KeypointPosDim = PosDim * NumKeypoints
 
-# Ref: https://github.com/rr-learning/rrc_simulation/blob/master/python/rrc_simulation/trifinger_platform.py#L68
+    # for target
+    VecDim = 3
+
+
+dims = SMGObjectTaskDimensions
+
 # maximum joint torque (in N-m) applicable on each actuator
-_max_torque_Nm = 0.36
+max_torque_Nm = 2.0
 
 # maximum joint velocity (in rad/s) on each actuator
-_max_velocity_radps = 10
+# max_velocity_radps = np.deg2rad(15.0)
+# max_velocity_radps = np.deg2rad(30.0)
+max_velocity_radps = np.deg2rad(45.0)
+
+robot_dof_gains = {
+    # The kp and kd gains of the PD control of the fingers.
+    # Note: This depends on simulation step size and is set for a rate of 250 Hz.
+    "stiffness": [1.0, 1.0, 1.0] * dims.NumFingers.value,
+    "damping": [0.01, 0.01, 0.01] * dims.NumFingers.value,
+}
+
+# actuated joints on the hand
+control_joint_names = [
+    "SMG_F1J1", "SMG_F1J2", "SMG_F1J3",
+    "SMG_F2J1", "SMG_F2J2", "SMG_F2J3",
+    "SMG_F3J1", "SMG_F3J2", "SMG_F3J3",
+]
 
 # limits of the robot (mapped later: str -> torch.tensor)
 robot_limits = {
     "joint_position": SimpleNamespace(
         # matches those on the real robot
-        low=np.array([-0.785, -1.396, -1.047] * NumFingers, dtype=np.float32),
-        high=np.array([0.785, 1.047, 1.57] * NumFingers, dtype=np.float32),
-        default=np.array([0.0, 0.9, -1.7] * NumFingers, dtype=np.float32),
+        low=np.array([-0.785, -1.396, -1.047] * dims.NumFingers.value, dtype=np.float32),
+        high=np.array([0.785, 1.047, 1.396] * dims.NumFingers.value, dtype=np.float32),
+        default=np.deg2rad([0.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
+        rand_lolim=np.deg2rad([-20.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
+        rand_uplim=np.deg2rad([20.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
     ),
     "joint_velocity": SimpleNamespace(
-        low=np.full(JointVelocityDim, -_max_velocity_radps, dtype=np.float32),
-        high=np.full(JointVelocityDim, _max_velocity_radps, dtype=np.float32),
-        default=np.zeros(JointVelocityDim, dtype=np.float32),
+        low=np.full(dims.JointVelocityDim.value, -max_velocity_radps, dtype=np.float32),
+        high=np.full(dims.JointVelocityDim.value, max_velocity_radps, dtype=np.float32),
+        default=np.zeros(dims.JointVelocityDim.value, dtype=np.float32),
     ),
     "joint_torque": SimpleNamespace(
-        low=np.full(JointTorqueDim, -_max_torque_Nm, dtype=np.float32),
-        high=np.full(JointTorqueDim, _max_torque_Nm, dtype=np.float32),
-        default=np.zeros(JointTorqueDim, dtype=np.float32),
+        low=np.full(dims.JointTorqueDim.value, -max_torque_Nm, dtype=np.float32),
+        high=np.full(dims.JointTorqueDim.value, max_torque_Nm, dtype=np.float32),
+        default=np.zeros(dims.JointTorqueDim.value, dtype=np.float32),
     ),
     "fingertip_position": SimpleNamespace(
-        low=np.array([-0.4, -0.4, 0] * NumFingers, dtype=np.float32),
-        high=np.array([0.4, 0.4, 0.5] * NumFingers, dtype=np.float32),
+        low=np.array([-0.5, -0.5, 0] * dims.NumFingers.value, dtype=np.float32),
+        high=np.array([0.5, 0.5, 0.5] * dims.NumFingers.value, dtype=np.float32),
     ),
     "fingertip_orientation": SimpleNamespace(
-        low=-np.ones(4 * NumFingers, dtype=np.float32),
-        high=np.ones(4 * NumFingers, dtype=np.float32),
+        low=-np.ones(4 * dims.NumFingers.value, dtype=np.float32),
+        high=np.ones(4 * dims.NumFingers.value, dtype=np.float32),
     ),
     "fingertip_velocity": SimpleNamespace(
-        low=np.full(VelocityDim, -0.2, dtype=np.float32),
-        high=np.full(VelocityDim, 0.2, dtype=np.float32),
+        low=np.full(dims.VelocityDim.value, -0.2, dtype=np.float32),
+        high=np.full(dims.VelocityDim.value, 0.2, dtype=np.float32),
     ),
     "bool_tip_contacts": SimpleNamespace(
-        low=np.zeros(NumFingers, dtype=np.float32),
-        high=np.ones(NumFingers, dtype=np.float32),
+        low=np.zeros(dims.NumFingers.value, dtype=np.float32),
+        high=np.ones(dims.NumFingers.value, dtype=np.float32),
     ),
     "tip_contact_forces": SimpleNamespace(
-        low=np.array([-1.0, -1.0, -1.0] * NumFingers, dtype=np.float32),
-        high=np.array([1.0, 1.0, 1.0] * NumFingers, dtype=np.float32),
+        low=np.array([-1.0, -1.0, -1.0] * dims.NumFingers.value, dtype=np.float32),
+        high=np.array([1.0, 1.0, 1.0] * dims.NumFingers.value, dtype=np.float32),
     ),
 }
 
 object_limits = {
     "position": SimpleNamespace(
-        low=np.array([-0.3, -0.3, 0], dtype=np.float32),
-        high=np.array([0.3, 0.3, 0.3], dtype=np.float32),
+        low=np.array([-0.5, -0.5, 0], dtype=np.float32),
+        high=np.array([0.5, 0.5, 0.5], dtype=np.float32),
     ),
     "orientation": SimpleNamespace(
         low=-np.ones(4, dtype=np.float32),
         high=np.ones(4, dtype=np.float32),
     ),
     "keypoint_position": SimpleNamespace(
-        low=np.array([-0.3, -0.3, 0] * NumKeypoints, dtype=np.float32),
-        high=np.array([0.3, 0.3, 0.3] * NumKeypoints, dtype=np.float32),
+        low=np.array([-0.5, -0.5, 0] * dims.NumKeypoints.value, dtype=np.float32),
+        high=np.array([0.5, 0.5, 0.5] * dims.NumKeypoints.value, dtype=np.float32),
     ),
     "linear_velocity": SimpleNamespace(
-        low=np.full(LinearVelocityDim, -0.5, dtype=np.float32),
-        high=np.full(LinearVelocityDim, 0.5, dtype=np.float32),
+        low=np.full(dims.LinearVelocityDim.value, -0.5, dtype=np.float32),
+        high=np.full(dims.LinearVelocityDim.value, 0.5, dtype=np.float32),
     ),
     "angular_velocity": SimpleNamespace(
-        low=np.full(AngularVelocityDim, -0.5, dtype=np.float32),
-        high=np.full(AngularVelocityDim, 0.5, dtype=np.float32),
+        low=np.full(dims.AngularVelocityDim.value, -0.5, dtype=np.float32),
+        high=np.full(dims.AngularVelocityDim.value, 0.5, dtype=np.float32),
     ),
 }
 
@@ -112,21 +138,11 @@ target_limits = {
         high=np.ones(4, dtype=np.float32),
     ),
     "pivot_axel_vector": SimpleNamespace(
-        low=np.full(VecDim, -1.0, dtype=np.float32),
-        high=np.full(VecDim, 1.0, dtype=np.float32),
+        low=np.full(dims.VecDim.value, -1.0, dtype=np.float32),
+        high=np.full(dims.VecDim.value, 1.0, dtype=np.float32),
     ),
     "pivot_axel_position": SimpleNamespace(
-        low=np.full(PosDim, -0.025, dtype=np.float32),
-        high=np.full(PosDim, 0.025, dtype=np.float32),
+        low=np.full(dims.PosDim.value, -0.05, dtype=np.float32),
+        high=np.full(dims.PosDim.value, 0.05, dtype=np.float32),
     ),
-}
-
-robot_dof_gains = {
-    # The kp and kd gains of the PD control of the fingers.
-    # Note: This depends on simulation step size and is set for a rate of 250 Hz.
-    "stiffness": [10.0, 10.0, 10.0] * NumFingers,
-    "damping": [0.1, 0.3, 0.001] * NumFingers,
-    # The kd gains used for damping the joint motor velocities during the
-    # safety torque check on the joint motors.
-    "safety_damping": [0.08, 0.08, 0.04] * NumFingers
 }

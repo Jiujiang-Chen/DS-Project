@@ -29,8 +29,8 @@ physics_engine: 'physx'
 pipeline: 'gpu'
 
 # device for running physics simulation
-sim_device: 'cuda:0'
-# sim_device: 'cpu'
+# sim_device: 'cuda:0'
+sim_device: 'cpu'
 
 # device to run RL
 rl_device: 'cuda:0'

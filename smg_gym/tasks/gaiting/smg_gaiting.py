@@ -3,7 +3,7 @@ Train:
 python train.py task=smg_gaiting headless=True
 
 # train low env num
-python train.py task=smg_gaiting task.env.num_envs=8 headless=False
+python train.py task=smg_gaiting task.env.num_envs=8 headless=False train.params.config.horizon_length=1024  train.params.config.minibatch_size=32
 
 Test:
 python train.py task=smg_gaiting task.env.num_envs=8 test=True headless=False checkpoint=runs/smg_gaiting/nn/smg_gaiting.pth

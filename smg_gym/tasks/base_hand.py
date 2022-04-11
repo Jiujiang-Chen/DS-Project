@@ -2,15 +2,12 @@ from types import SimpleNamespace
 import numpy as np
 import os
 import torch
-import enum
 
-from isaacgym.torch_utils import unscale
 from isaacgym.torch_utils import quat_mul
 from isaacgym.torch_utils import quat_conjugate
 from isaacgym.torch_utils import quat_rotate
 from isaacgym.torch_utils import to_torch
 from isaacgym.torch_utils import torch_rand_float
-from isaacgym.torch_utils import tensor_clamp
 from isaacgym import gymtorch
 from isaacgym import gymapi
 from isaacgym import gymutil
@@ -26,13 +23,20 @@ from smg_gym.utils.torch_jit_utils import unscale_transform
 from smg_gym.utils.draw_utils import get_sphere_geom
 from smg_gym.assets import add_assets_path
 
+from smg_gym.tasks.smg_object_task_params import SMGObjectTaskDimensions
 from smg_gym.tasks.smg_object_task_params import robot_limits
 from smg_gym.tasks.smg_object_task_params import object_limits
 from smg_gym.tasks.smg_object_task_params import target_limits
 from smg_gym.tasks.smg_object_task_params import robot_dof_gains
+from smg_gym.tasks.smg_object_task_params import control_joint_names
+from smg_gym.tasks.smg_object_task_params import max_torque_Nm
+from smg_gym.tasks.smg_object_task_params import max_velocity_radps
 
 
 class BaseShadowModularGrasper(VecTask):
+
+    # dimensions useful for SMG hand + object tasks
+    _dims = SMGObjectTaskDimensions
 
     # limits of the robot (mapped later: str -> torch.tensor)
     _robot_limits = robot_limits
@@ -44,8 +48,14 @@ class BaseShadowModularGrasper(VecTask):
     _target_limits = target_limits
 
     # PD gains for the robot (mapped later: str -> torch.tensor)
-    # Ref: https://github.com/rr-learning/rrc_simulation/blob/master/python/rrc_simulation/sim_finger.py#L49-L65
     _robot_dof_gains = robot_dof_gains
+
+    # actuated joints of the hand
+    _control_joint_names = control_joint_names
+
+    # torque and velocity limits
+    _max_torque_Nm = max_torque_Nm
+    _max_velocity_radps = max_velocity_radps
 
     def __init__(
         self,
@@ -61,7 +71,9 @@ class BaseShadowModularGrasper(VecTask):
         self.env_spacing = cfg["env"]["env_spacing"]
         self.obj_name = cfg["env"]["obj_name"]
 
-        # action params
+        # TODO: action params
+        self.use_sim_pd_control = cfg["env"]["use_sim_pd_control"]
+        self.dof_speed_scale = cfg["env"]["dof_speed_scale"]
 
         super().__init__(config=cfg, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless)
 
@@ -292,22 +304,33 @@ class BaseShadowModularGrasper(VecTask):
         asset_options.override_com = True
         asset_options.override_inertia = True
         asset_options.collapse_fixed_joints = False
-        asset_options.armature = 0.00001
+        asset_options.thickness = 0.0001
         asset_options.mesh_normal_mode = gymapi.COMPUTE_PER_VERTEX
-        asset_options.default_dof_drive_mode = int(gymapi.DOF_MODE_POS)
         asset_options.convex_decomposition_from_submeshes = False
         asset_options.vhacd_enabled = False
         asset_options.flip_visual_attachments = False
 
+        asset_options.armature = 0.00001
+        if self.physics_engine == gymapi.SIM_PHYSX:
+            asset_options.use_physx_armature = True
+
+        if self.use_sim_pd_control:
+            asset_options.default_dof_drive_mode = int(gymapi.DOF_MODE_POS)
+        else:
+            asset_options.default_dof_drive_mode = int(gymapi.DOF_MODE_EFFORT)
+
         self.hand_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
 
-        self.control_joint_names = [
-            "SMG_F1J1", "SMG_F1J2", "SMG_F1J3",
-            "SMG_F2J1", "SMG_F2J2", "SMG_F2J3",
-            "SMG_F3J1", "SMG_F3J2", "SMG_F3J3",
+        hand_shape_props = self.gym.get_asset_rigid_shape_properties(self.hand_asset)
+        for p in hand_shape_props:
+            p.friction = 1.0
+            p.torsion_friction = 1.0
+            p.restitution = 0.8
+        self.gym.set_asset_rigid_shape_properties(self.hand_asset, hand_shape_props)
+
+        self.control_joint_dof_indices = [
+            self.gym.find_asset_dof_index(self.hand_asset, name) for name in self._control_joint_names
         ]
-        self.control_joint_dof_indices = [self.gym.find_asset_dof_index(
-            self.hand_asset, name) for name in self.control_joint_names]
         self.control_joint_dof_indices = to_torch(self.control_joint_dof_indices, dtype=torch.long, device=self.device)
 
         # get counts from hand asset
@@ -315,49 +338,8 @@ class BaseShadowModularGrasper(VecTask):
         self.n_hand_shapes = self.gym.get_asset_rigid_shape_count(self.hand_asset)
         self.n_hand_dofs = self.gym.get_asset_dof_count(self.hand_asset)
 
-        # set initial joint state tensor (get updated on reset and step)
-        self.prev_targets = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
-        self.cur_targets = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
-
-        # used to randomise the initial pose of the hand
-        if self.randomize and self.rand_hand_joints:
-            self.init_joint_mins = to_torch(np.array([
-                -20.0*(np.pi/180),
-                7.5*(np.pi/180),
-                -10.0*(np.pi/180),
-            ] * 3), device=self.device)
-
-            self.init_joint_maxs = to_torch(np.array([
-                20.0*(np.pi/180),
-                7.5*(np.pi/180),
-                -10.0*(np.pi/180),
-            ] * 3), device=self.device)
-
-        else:
-            self.init_joint_mins = to_torch(np.array([
-                0.0*(np.pi/180),
-                7.5*(np.pi/180),
-                -10.0*(np.pi/180),
-            ] * 3), device=self.device)
-
-            self.init_joint_maxs = to_torch(np.array([
-                0.0*(np.pi/180),
-                7.5*(np.pi/180),
-                -10.0*(np.pi/180),
-            ] * 3), device=self.device)
-
-        # get hand limits
-        hand_dof_props = self.gym.get_asset_dof_properties(self.hand_asset)
-
-        self.hand_dof_lower_limits = []
-        self.hand_dof_upper_limits = []
-
-        for i in range(self.n_hand_dofs):
-            self.hand_dof_lower_limits.append(hand_dof_props["lower"][i])
-            self.hand_dof_upper_limits.append(hand_dof_props["upper"][i])
-
-        self.hand_dof_lower_limits = to_torch(self.hand_dof_lower_limits, device=self.device)
-        self.hand_dof_upper_limits = to_torch(self.hand_dof_upper_limits, device=self.device)
+        # target tensor for updating
+        self.target_dof_pos = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
 
     def _setup_obj(self):
 
@@ -379,7 +361,6 @@ class BaseShadowModularGrasper(VecTask):
         self.obj_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
 
         # set object properties
-        # Ref: https://github.com/rr-learning/rrc_simulation/blob/master/python/rrc_simulation/collision_objects.py#L96
         obj_props = self.gym.get_asset_rigid_shape_properties(self.obj_asset)
         for p in obj_props:
             p.friction = 2.0
@@ -414,7 +395,7 @@ class BaseShadowModularGrasper(VecTask):
     def _setup_keypoints(self):
 
         self.kp_dist = 0.06
-        self.n_keypoints = 6
+        self.n_keypoints = self._dims.NumKeypoints.value
 
         self.obj_kp_positions = torch.zeros(size=(self.num_envs, self.n_keypoints, 3), device=self.device)
         self.goal_kp_positions = torch.zeros(size=(self.num_envs, self.n_keypoints, 3), device=self.device)
@@ -496,11 +477,30 @@ class BaseShadowModularGrasper(VecTask):
         handle = self.gym.create_actor(env_ptr, self.hand_asset, pose, "hand_actor_{}".format(idx), -1, -1)
 
         # Configure DOF properties
-        props = self.gym.get_actor_dof_properties(env_ptr, handle)
-        props["driveMode"] = [gymapi.DOF_MODE_POS] * self.n_hand_dofs
-        props["stiffness"] = [5000.0] * self.n_hand_dofs
-        props["damping"] = [100.0] * self.n_hand_dofs
-        self.gym.set_actor_dof_properties(env_ptr, handle, props)
+        hand_dof_props = self.gym.get_actor_dof_properties(env_ptr, handle)
+
+        # set dof properites based on the control mode
+        for dof_index in range(self.n_hand_dofs):
+
+            # Use Isaacgym PD control
+            if self.use_sim_pd_control:
+                hand_dof_props['driveMode'][dof_index] = gymapi.DOF_MODE_POS
+                hand_dof_props['stiffness'][dof_index] = float(self._robot_dof_gains["stiffness"][dof_index])
+                hand_dof_props['damping'][dof_index] = float(self._robot_dof_gains["damping"][dof_index])
+
+            # Manually compute and apply torque even in position mode
+            # (as done in Trifinger paper).
+            else:
+                hand_dof_props['driveMode'][dof_index] = gymapi.DOF_MODE_EFFORT
+                hand_dof_props['stiffness'][dof_index] = 0.0
+                hand_dof_props['damping'][dof_index] = 0.0
+
+            hand_dof_props['effort'][dof_index] = self._max_torque_Nm
+            hand_dof_props['velocity'][dof_index] = self._max_velocity_radps
+            hand_dof_props['lower'][dof_index] = float(self._robot_limits["joint_position"].low[dof_index])
+            hand_dof_props['upper'][dof_index] = float(self._robot_limits["joint_position"].high[dof_index])
+
+        self.gym.set_actor_dof_properties(env_ptr, handle, hand_dof_props)
 
         self.gym.end_aggregate(env_ptr)
 
@@ -571,9 +571,38 @@ class BaseShadowModularGrasper(VecTask):
         return fingertip_tcp_body_idxs
 
     def get_rich_fingertip_contacts(self):
+        """ contact properties
+        'env0', 'env1',
+        'body0', 'body1',
+        'localPos0', 'localPos1',
+        'minDist',
+        'initialOverlap',
+        'normal',
+        'offset0', 'offset1',
+        'lambda',
+        'lambdaFriction',
+        'friction',
+        'torsionFriction',
+        'rollingFriction'
+        """
+        if self.device != 'cpu':
+            raise ValueError("Rich contacts not available with GPU sim_device.")
+
+        print('')
+        print('')
+        print('')
+        print('')
+        tip_offset = np.array([0.0, -0.02, 0.0535])
         for i in range(self.num_envs):
             contacts = self.gym.get_env_rigid_contacts(self.envs[i])
-            # print(contacts)
+            for contact in contacts:
+                body0 = contact['body0']
+                body1 = contact['body1']
+                if body0 == self.obj_body_idx and body1 in self.tip_body_idxs:
+                    tip_contact_pos = contact['localPos1'] - tip_offset
+                    force_mag = contact['lambda']
+                    print(tip_contact_pos)
+                    # print(body0, body1)
 
     def get_fingertip_contacts(self):
 
@@ -595,9 +624,11 @@ class BaseShadowModularGrasper(VecTask):
         # repeat for n_tips shape=(n_envs, n_tips)
         onehot_obj_contacts = bool_obj_contacts.unsqueeze(1).repeat(1, self.n_tips)
 
-        # get envs where object and tips are contated
+        # get envs where object and tips are contacted
         tip_object_contacts = torch.where(
-            onehot_obj_contacts > 0, bool_tip_contacts, torch.zeros(size=(self.num_envs, self.n_tips), device=self.device)
+            onehot_obj_contacts > 0,
+            bool_tip_contacts,
+            torch.zeros(size=(self.num_envs, self.n_tips), device=self.device)
         )
         n_tip_contacts = torch.sum(bool_tip_contacts, dim=1)
 
@@ -645,100 +676,99 @@ class BaseShadowModularGrasper(VecTask):
 
         # joint position
         start_offset = 0
-        end_offset = start_offset + 9
+        end_offset = start_offset + self._dims.JointPositionDim.value
         if buf_cfg["joint_pos"]:
-            buf[:, start_offset:end_offset] = unscale(
-                self.hand_joint_pos, self.hand_dof_lower_limits, self.hand_dof_upper_limits)
+            buf[:, start_offset:end_offset] = self.hand_joint_pos
 
         # joint velocity
         start_offset = end_offset
-        end_offset = start_offset + 9
+        end_offset = start_offset + self._dims.JointVelocityDim.value
         if buf_cfg["joint_vel"]:
             buf[:, start_offset:end_offset] = self.hand_joint_vel
 
         # fingertip positions
         start_offset = end_offset
-        end_offset = start_offset + 9
+        end_offset = start_offset + self._dims.FingertipPosDim.value
         if buf_cfg["fingertip_pos"]:
             buf[:, start_offset:end_offset] = self.fingertip_pos
 
         # fingertip orn
         start_offset = end_offset
-        end_offset = start_offset + 12
+        end_offset = start_offset + self._dims.FingertipOrnDim.value
         if buf_cfg["fingertip_orn"]:
             buf[:, start_offset:end_offset] = self.fingertip_orn.reshape(self.num_envs, self.n_tips*4)
 
         # latest actions
         start_offset = end_offset
-        end_offset = start_offset + 9
+        end_offset = start_offset + self._dims.ActionDim.value
         if buf_cfg["last_action"]:
             buf[:, start_offset:end_offset] = self.action_buf
 
         # boolean tips in contacts
         start_offset = end_offset
-        end_offset = start_offset + 3
+        end_offset = start_offset + self._dims.NumFingers.value
         if buf_cfg["bool_tip_contacts"]:
             buf[:, start_offset:end_offset] = self.tip_object_contacts
 
         # tip contact forces
         start_offset = end_offset
-        end_offset = start_offset + 9
+        end_offset = start_offset + self._dims.FingerContactForceDim.value
         if buf_cfg["tip_contact_forces"]:
             buf[:, start_offset:end_offset] = self.net_tip_contact_forces.reshape(self.num_envs, self.n_tips*3)
 
         # object position
         start_offset = end_offset
-        end_offset = start_offset + 3
+        end_offset = start_offset + self._dims.PosDim.value
         if buf_cfg["object_pos"]:
             buf[:, start_offset:end_offset] = self.obj_base_pos
 
         # object orientation
         start_offset = end_offset
-        end_offset = start_offset + 4
+        end_offset = start_offset + self._dims.OrnDim.value
         if buf_cfg["object_orn"]:
             buf[:, start_offset:end_offset] = self.obj_base_orn
 
         # object keypoints
         start_offset = end_offset
-        end_offset = start_offset + self.n_keypoints*3
+        end_offset = start_offset + self._dims.KeypointPosDim.value
         if buf_cfg["object_kps"]:
             buf[:, start_offset:end_offset] = (self.obj_kp_positions
                                                - self.obj_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
 
         # object linear velocity
         start_offset = end_offset
-        end_offset = start_offset + 3
+        end_offset = start_offset + self._dims.LinearVelocityDim.value
         if buf_cfg["object_linvel"]:
             buf[:, start_offset:end_offset] = self.obj_base_linvel
 
         # object angular velocity
         start_offset = end_offset
-        end_offset = start_offset + 3
+        end_offset = start_offset + self._dims.AngularVelocityDim.value
         if buf_cfg["object_angvel"]:
             buf[:, start_offset:end_offset] = self.obj_base_angvel
 
         # goal position
         start_offset = end_offset
-        end_offset = start_offset + 3
+        end_offset = start_offset + self._dims.PosDim.value
         if buf_cfg["goal_pos"]:
             buf[:, start_offset:end_offset] = self.goal_base_pos
 
         # goal orientation
         start_offset = end_offset
-        end_offset = start_offset + 4
+        end_offset = start_offset + self._dims.OrnDim.value
         if buf_cfg["goal_orn"]:
             buf[:, start_offset:end_offset] = self.goal_base_orn
 
         # goal keypoints
         start_offset = end_offset
-        end_offset = start_offset + self.n_keypoints*3
+        end_offset = start_offset + self._dims.KeypointPosDim.value
         if buf_cfg["goal_kps"]:
-            buf[:, start_offset:end_offset] = (self.goal_kp_positions
-                                               - self.goal_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
+            buf[:, start_offset:end_offset] = (
+                self.goal_kp_positions - self.goal_displacement_tensor).reshape(self.num_envs, self._dims.KeypointPosDim.value)
 
         # active quat between goal and object
         start_offset = end_offset
-        end_offset = start_offset + 4
+        end_offset = start_offset + self._dims.OrnDim.value
         if buf_cfg["active_quat"]:
             self.obs_buf[:, start_offset:end_offset] = quat_mul(self.obj_base_orn, quat_conjugate(self.goal_base_orn))
 
@@ -772,24 +802,33 @@ class BaseShadowModularGrasper(VecTask):
         """
         num_envs_to_reset = len(env_ids_for_reset)
 
-        # reset hand
-        hand_velocities = torch.zeros((num_envs_to_reset, self.n_hand_dofs), device=self.device)
-
         # add randomisation to the joint poses
-        rand_floats = torch_rand_float(-1.0, 1.0, (num_envs_to_reset, self.n_hand_dofs), device=self.device)
-        rand_init_pos = self.init_joint_mins + \
-            (self.init_joint_maxs - self.init_joint_mins) * rand_floats[:, :self.n_hand_dofs]
+        if self.randomize and self.rand_hand_joints:
 
-        self.dof_pos[env_ids_for_reset, :] = rand_init_pos[:]
-        self.dof_vel[env_ids_for_reset, :] = hand_velocities[:]
+            # sample uniform random from (-1, 1)
+            rand_stddev = torch_rand_float(-1.0, 1.0, (num_envs_to_reset, self.n_hand_dofs), device=self.device)
 
-        self.prev_targets[env_ids_for_reset, :self.n_hand_dofs] = rand_init_pos
-        self.cur_targets[env_ids_for_reset, :self.n_hand_dofs] = rand_init_pos
+            # add noise to DOF positions
+            delta_max = self._robot_limits["joint_position"].rand_uplim - self._robot_limits["joint_position"].default
+            delta_min = self._robot_limits["joint_position"].rand_lolim - self._robot_limits["joint_position"].default
+            target_dof_pos = self._robot_limits["joint_position"].default + \
+                delta_min + (delta_max - delta_min) * rand_stddev
+            target_dof_vel = self._robot_limits["joint_velocity"].default
 
+        else:
+            target_dof_pos = self._robot_limits["joint_position"].default
+            target_dof_vel = self._robot_limits["joint_velocity"].default
+
+        self.dof_pos[env_ids_for_reset, :] = target_dof_pos
+        self.dof_vel[env_ids_for_reset, :] = target_dof_vel
+
+        self.target_dof_pos[env_ids_for_reset, :self.n_hand_dofs] = target_dof_pos
+
+        # set DOF states to those reset
         hand_ids_int32 = self.hand_indices[env_ids_for_reset].to(torch.int32)
         self.gym.set_dof_position_target_tensor_indexed(
             self.sim,
-            gymtorch.unwrap_tensor(self.prev_targets),
+            gymtorch.unwrap_tensor(self.target_dof_pos),
             gymtorch.unwrap_tensor(hand_ids_int32),
             num_envs_to_reset
         )
@@ -880,36 +919,63 @@ class BaseShadowModularGrasper(VecTask):
         self.reset_buf[env_ids_for_reset] = 0
         self.successes[env_ids_for_reset] = 0
 
-    def apply_actions_v2(self):
+    def apply_actions(self):
         """
         Setting of input actions into simulator before performing the physics simulation step.
-
-        @note The input actions are read from the action buffer variable `_action_buf`.
+        Actions are in action_buf variable.
         """
-
+        # zero/positive/negative actions for debugging
+        # self.action_buf = torch.zeros_like(self.action_buf)
         # self.action_buf = torch.ones_like(self.action_buf)
         # self.action_buf = torch.ones_like(self.action_buf) * -1
 
         # if normalized_action is true, then denormalize them.
         if self.cfg["env"]["normalize_action"]:
-            action_transformed = unscale_transform(
+            actions_transformed = unscale_transform(
                 self.action_buf,
                 lower=self._action_scale.low,
                 upper=self._action_scale.high
             )
         else:
-            action_transformed = self._action_buf
+            actions_transformed = self.action_buf
 
+        if self.use_sim_pd_control:
+            self.apply_actions_sim_pd(actions_transformed)
+        else:
+            self.apply_actions_custom_pd(actions_transformed)
+
+    def apply_actions_sim_pd(self, actions):
+        """
+        Use IsaacGym PD controller for applying actions.
+        """
+        new_targets = self.target_dof_pos + self.dof_speed_scale * self.dt * actions
+        self.target_dof_pos = saturate(
+            new_targets,
+            lower=self._robot_limits['joint_position'].low,
+            upper=self._robot_limits['joint_position'].high
+        )
+        self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.target_dof_pos))
+
+    def apply_actions_custom_pd(self, actions):
+        """
+        Use custom PD controller for applying actions.
+        """
         # compute command on the basis of mode selected
         if self.cfg["env"]["command_mode"] == 'torque':
             # command is the desired joint torque
-            computed_torque = action_transformed
+            computed_torque = actions
 
         elif self.cfg["env"]["command_mode"] == 'position':
-            # command is the desired joint positions
-            desired_dof_position = action_transformed
+
+            new_targets = self.target_dof_pos + self.dof_speed_scale * self.dt * actions
+            self.target_dof_pos = saturate(
+                new_targets,
+                lower=self._robot_limits['joint_position'].low,
+                upper=self._robot_limits['joint_position'].high
+            )
+
             # compute torque to apply
-            computed_torque = self._robot_dof_gains["stiffness"] * (desired_dof_position - self.dof_pos)
+            computed_torque = self._robot_dof_gains["stiffness"] * (self.target_dof_pos - self.dof_pos)
             computed_torque -= self._robot_dof_gains["damping"] * self.dof_vel
 
         else:
@@ -923,39 +989,14 @@ class BaseShadowModularGrasper(VecTask):
             upper=self._robot_limits["joint_torque"].high
         )
 
-        # apply safety damping and clamping of the action torque if enabled
-        if self.cfg["env"]["apply_safety_damping"]:
-            # apply damping by joint velocity
-            applied_torque -= self._robot_dof_gains["safety_damping"] * self._dof_velocity
-            # clamp input
-            applied_torque = saturate(
-                applied_torque,
-                lower=self._robot_limits["joint_torque"].low,
-                upper=self._robot_limits["joint_torque"].high
-            )
-
         # set computed torques to simulator buffer.
         self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(applied_torque))
-
-    def apply_actions(self):
-
-        dof_speed_scale = 10.0
-        targets = self.prev_targets[:, self.control_joint_dof_indices] + dof_speed_scale * self.dt * self.action_buf
-
-        self.cur_targets[:, self.control_joint_dof_indices] = tensor_clamp(
-            targets,
-            self.hand_dof_lower_limits[self.control_joint_dof_indices],
-            self.hand_dof_upper_limits[self.control_joint_dof_indices],
-        )
-
-        self.prev_targets[:, self.control_joint_dof_indices] = self.cur_targets[:, self.control_joint_dof_indices]
-        self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.cur_targets))
 
     def compute_observations(self):
 
         # get which tips are in contact
         self.net_tip_contact_forces, self.tip_object_contacts, self.n_tip_contacts = self.get_fingertip_contacts()
-        # self.get_rich_fingertip_contacts()
+        self.get_rich_fingertip_contacts()
 
         # get tcp positions
         fingertip_states = self.rigid_body_tensor[:, self.fingertip_tcp_body_idxs, :]

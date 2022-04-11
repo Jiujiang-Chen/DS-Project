@@ -193,3 +193,31 @@ _robot_dof_gains = {
     # safety torque check on the joint motors.
     "safety_damping": [0.08, 0.08, 0.04] * _dims.NumFingers.value
 }
+
+
+# used to randomise the initial pose of the hand
+if self.randomize and self.rand_hand_joints:
+    self.init_joint_mins = to_torch(np.array([
+        -20.0*(np.pi/180),
+        7.5*(np.pi/180),
+        -10.0*(np.pi/180),
+    ] * 3), device=self.device)
+
+    self.init_joint_maxs = to_torch(np.array([
+        20.0*(np.pi/180),
+        7.5*(np.pi/180),
+        -10.0*(np.pi/180),
+    ] * 3), device=self.device)
+
+else:
+    self.init_joint_mins = to_torch(np.array([
+        0.0*(np.pi/180),
+        7.5*(np.pi/180),
+        -10.0*(np.pi/180),
+    ] * 3), device=self.device)
+
+    self.init_joint_maxs = to_torch(np.array([
+        0.0*(np.pi/180),
+        7.5*(np.pi/180),
+        -10.0*(np.pi/180),
+    ] * 3), device=self.device)
