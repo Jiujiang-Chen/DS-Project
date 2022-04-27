@@ -103,9 +103,21 @@ robot_limits = {
         low=np.zeros(dims.NumFingers.value, dtype=np.float32),
         high=np.ones(dims.NumFingers.value, dtype=np.float32),
     ),
-    "tip_contact_forces": SimpleNamespace(
+    "net_tip_contact_forces": SimpleNamespace(
         low=np.array([-1.0, -1.0, -1.0] * dims.NumFingers.value, dtype=np.float32),
         high=np.array([1.0, 1.0, 1.0] * dims.NumFingers.value, dtype=np.float32),
+    ),
+    "tip_contact_positions": SimpleNamespace(
+        low=np.array([-0.02, -0.02, -0.02] * dims.NumFingers.value, dtype=np.float32),
+        high=np.array([0.02, 0.02, 0.02] * dims.NumFingers.value, dtype=np.float32),
+    ),
+    "tip_contact_normals": SimpleNamespace(
+        low=np.array([-1.0, -1.0, -1.0] * dims.NumFingers.value, dtype=np.float32),
+        high=np.array([1.0, 1.0, 1.0] * dims.NumFingers.value, dtype=np.float32),
+    ),
+    "tip_contact_force_mags": SimpleNamespace(
+        low=np.array([0.0] * dims.NumFingers.value, dtype=np.float32),
+        high=np.array([5.0] * dims.NumFingers.value, dtype=np.float32),
     ),
 }
 

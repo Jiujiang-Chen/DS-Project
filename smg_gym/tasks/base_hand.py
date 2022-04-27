@@ -1,7 +1,9 @@
+from typing import Deque
 from types import SimpleNamespace
 import numpy as np
 import os
 import torch
+from collections import deque
 
 from isaacgym.torch_utils import quat_mul
 from isaacgym.torch_utils import quat_conjugate
@@ -57,6 +59,20 @@ class BaseShadowModularGrasper(VecTask):
     _max_torque_Nm = max_torque_Nm
     _max_velocity_radps = max_velocity_radps
 
+    # History of state: Number of timesteps to save history for.
+    # The length of list is the history of the state: 0: t, 1: t-1, 2: t-2, ... step.
+    _state_history_len = 1
+
+    # Hand joint states list([num. of instances, num. of dofs])
+    _hand_joint_pos_history: Deque[torch.Tensor] = deque(maxlen=_state_history_len)
+
+    # Fingertip tcp state list([num. of instances, num. of fingers, 13]) where 13: (pos, quat, linvel, angvel)
+    _fingertip_tcp_state_history: Deque[torch.Tensor] = deque(maxlen=_state_history_len)
+
+    # Object root state [num. of instances, 13] where 13: (pos, quat, linvel, angvel)
+    _object_base_pos_history: Deque[torch.Tensor] = deque(maxlen=_state_history_len)
+    _object_base_orn_history: Deque[torch.Tensor] = deque(maxlen=_state_history_len)
+
     def __init__(
         self,
         cfg,
@@ -70,6 +86,7 @@ class BaseShadowModularGrasper(VecTask):
         self.debug_viz = cfg["env"]["enable_debug_vis"]
         self.env_spacing = cfg["env"]["env_spacing"]
         self.obj_name = cfg["env"]["obj_name"]
+        self.enable_rich_contacts = cfg["env"]["enable_rich_contacts"]
 
         # TODO: action params
         self.use_sim_pd_control = cfg["env"]["use_sim_pd_control"]
@@ -92,6 +109,9 @@ class BaseShadowModularGrasper(VecTask):
         # get indices useful for tracking contacts and fingertip positions
         self._setup_fingertip_tracking()
         self._setup_contact_tracking()
+
+        # inialize buffers that store history of observations
+        self.initialize_state_history_buffers()
 
         # refresh all tensors
         self.refresh_tensors()
@@ -188,86 +208,6 @@ class BaseShadowModularGrasper(VecTask):
             msg = f"Invalid command mode. Input: {self.cfg['env']['command_mode']} not in ['torque', 'position']."
             raise ValueError(msg)
 
-        # Observations scale for the MDP
-        # check if policy outputs normalized action [-1, 1] or not.
-        if self.cfg["env"]["normalize_action"]:
-            obs_action_scale = SimpleNamespace(
-                low=torch.full((self.num_actions,), -1, dtype=torch.float, device=self.device),
-                high=torch.full((self.num_actions,), 1, dtype=torch.float, device=self.device)
-            )
-        else:
-            obs_action_scale = self._action_scale
-
-        # Note: This is order sensitive.
-        self._observations_scale.low = torch.cat([
-            # robot
-            self._robot_limits["joint_position"].low,
-            self._robot_limits["joint_velocity"].low,
-            self._robot_limits["fingertip_position"].low,
-            self._robot_limits["fingertip_orientation"].low,
-
-            # action
-            obs_action_scale.low,
-
-            # tactile
-            self._robot_limits["bool_tip_contacts"].low,
-            self._robot_limits["tip_contact_forces"].low,
-
-            # object
-            self._object_limits["position"].low,
-            self._object_limits["orientation"].low,
-            self._object_limits["keypoint_position"].low,
-            self._object_limits["linear_velocity"].low,
-            self._object_limits["angular_velocity"].low,
-
-            # target
-            self._object_limits["position"].low,
-            self._object_limits["orientation"].low,
-            self._object_limits["keypoint_position"].low,
-            self._target_limits["active_quat"].low,
-            self._target_limits["pivot_axel_vector"].low,
-            self._target_limits["pivot_axel_position"].low,
-        ])
-
-        self._observations_scale.high = torch.cat([
-            # robot
-            self._robot_limits["joint_position"].high,
-            self._robot_limits["joint_velocity"].high,
-            self._robot_limits["fingertip_position"].high,
-            self._robot_limits["fingertip_orientation"].high,
-
-            # action
-            obs_action_scale.high,
-
-            # tactile
-            self._robot_limits["bool_tip_contacts"].high,
-            self._robot_limits["tip_contact_forces"].high,
-
-            # object
-            self._object_limits["position"].high,
-            self._object_limits["orientation"].high,
-            self._object_limits["keypoint_position"].high,
-            self._object_limits["linear_velocity"].high,
-            self._object_limits["angular_velocity"].high,
-
-            # target
-            self._object_limits["position"].high,
-            self._object_limits["orientation"].high,
-            self._object_limits["keypoint_position"].high,
-            self._target_limits["active_quat"].high,
-            self._target_limits["pivot_axel_vector"].high,
-            self._target_limits["pivot_axel_position"].high,
-        ])
-
-        # check that dimensions match
-        # observations
-        if self._observations_scale.low.shape[0] != self.num_obs or self._observations_scale.high.shape[0] != self.num_obs:
-            msg = f"Observation scaling dimensions mismatch. " \
-                  f"\tLow: {self._observations_scale.low.shape[0]}, " \
-                  f"\tHigh: {self._observations_scale.high.shape[0]}, " \
-                  f"\tExpected: {self.num_obs}."
-            raise AssertionError(msg)
-
         # actions
         if self._action_scale.low.shape[0] != self.num_actions or self._action_scale.high.shape[0] != self.num_actions:
             msg = f"Actions scaling dimensions mismatch. " \
@@ -276,6 +216,18 @@ class BaseShadowModularGrasper(VecTask):
                   f"\tExpected: {self.num_actions}."
 
             raise AssertionError(msg)
+
+    def initialize_state_history_buffers(self):
+        for _ in range(self._state_history_len):
+            self._hand_joint_pos_history.append(
+                torch.zeros(size=(self.num_envs, self.n_hand_dofs), dtype=torch.float32, device=self.device)
+            )
+            self._object_base_pos_history.append(
+                torch.zeros(size=(self.num_envs, self._dims.PosDim.value), dtype=torch.float32, device=self.device)
+            )
+            self._object_base_orn_history.append(
+                torch.zeros(size=(self.num_envs, self._dims.OrnDim.value), dtype=torch.float32, device=self.device)
+            )
 
     def create_sim(self):
         self.dt = self.sim_params.dt
@@ -544,6 +496,16 @@ class BaseShadowModularGrasper(VecTask):
             self.envs[0], self.obj_actor_handles[0], self.hand_actor_handles[0]
         )
 
+        # rich contacts
+        self.contact_positions = torch.zeros(
+                (self.num_envs, self.n_tips, self._dims.PosDim.value), dtype=torch.float, device=self.device)
+        self.contact_normals = torch.zeros(
+                (self.num_envs, self.n_tips, self._dims.VecDim.value), dtype=torch.float, device=self.device)
+        self.contact_force_mags = torch.zeros(
+                (self.num_envs, self.n_tips, 1), dtype=torch.float, device=self.device)
+
+        self.contact_geom = get_sphere_geom(rad=0.0025, color=(1, 1, 1))
+
     def _get_contact_idxs(self, env, obj_actor_handle, hand_actor_handle):
 
         obj_body_name = self.gym.get_actor_rigid_body_names(env, obj_actor_handle)
@@ -571,38 +533,47 @@ class BaseShadowModularGrasper(VecTask):
         return fingertip_tcp_body_idxs
 
     def get_rich_fingertip_contacts(self):
-        """ contact properties
-        'env0', 'env1',
-        'body0', 'body1',
-        'localPos0', 'localPos1',
-        'minDist',
-        'initialOverlap',
-        'normal',
-        'offset0', 'offset1',
-        'lambda',
-        'lambdaFriction',
-        'friction',
-        'torsionFriction',
-        'rollingFriction'
+        """
+        Contact Properties
+            'env0', 'env1',
+            'body0', 'body1',
+            'localPos0', 'localPos1',
+            'minDist',
+            'initialOverlap',
+            'normal',
+            'offset0', 'offset1',
+            'lambda',
+            'lambdaFriction',
+            'friction',
+            'torsionFriction',
+            'rollingFriction'
         """
         if self.device != 'cpu':
-            raise ValueError("Rich contacts not available with GPU sim_device.")
+            raise ValueError("Rich contacts not available with GPU pipeline.")
 
-        print('')
-        print('')
-        print('')
-        print('')
-        tip_offset = np.array([0.0, -0.02, 0.0535])
+        # iterate through environment to pull all contact info
         for i in range(self.num_envs):
             contacts = self.gym.get_env_rigid_contacts(self.envs[i])
-            for contact in contacts:
-                body0 = contact['body0']
-                body1 = contact['body1']
-                if body0 == self.obj_body_idx and body1 in self.tip_body_idxs:
-                    tip_contact_pos = contact['localPos1'] - tip_offset
-                    force_mag = contact['lambda']
-                    print(tip_contact_pos)
-                    # print(body0, body1)
+
+            # accumulate all contacts within an environment
+            for j, tip_body_idx in enumerate(self.tip_body_idxs):
+                tip_contacts = contacts[np.where(
+                    (contacts['body0'] == self.obj_body_idx)
+                    & (contacts['body1'] == tip_body_idx)
+                )]
+                self.contact_positions[i, j, :] = to_torch([
+                    tip_contacts['localPos1']['x'].mean() if len(tip_contacts['localPos1']['x']) > 0 else 0.0,
+                    tip_contacts['localPos1']['y'].mean() if len(tip_contacts['localPos1']['y']) > 0 else 0.0,
+                    tip_contacts['localPos1']['z'].mean() if len(tip_contacts['localPos1']['z']) > 0 else 0.0
+                ], device=self.device)
+                self.contact_normals[i, j, :] = to_torch([
+                    tip_contacts['normal']['x'].mean() if len(tip_contacts['normal']['x']) > 0 else 0.0,
+                    tip_contacts['normal']['y'].mean() if len(tip_contacts['normal']['y']) > 0 else 0.0,
+                    tip_contacts['normal']['z'].mean() if len(tip_contacts['normal']['z']) > 0 else 0.0
+                ], device=self.device)
+                self.contact_force_mags[i, j, :] = to_torch([
+                    tip_contacts['lambda'].mean() if len(tip_contacts['lambda']) > 0 else 0.0
+                ], device=self.device)
 
     def get_fingertip_contacts(self):
 
@@ -651,7 +622,6 @@ class BaseShadowModularGrasper(VecTask):
         self.compute_observations()
         self.fill_observation_buffer()
         self.fill_states_buffer()
-        self.norm_obs_state_buffer()
         self.compute_reward_and_termination()
 
         if self.viewer and self.debug_viz:
@@ -674,8 +644,10 @@ class BaseShadowModularGrasper(VecTask):
         observations after learning.
         """
 
+        start_offset, end_offset = 0, 0
+
         # joint position
-        start_offset = 0
+        start_offset = end_offset
         end_offset = start_offset + self._dims.JointPositionDim.value
         if buf_cfg["joint_pos"]:
             buf[:, start_offset:end_offset] = self.hand_joint_pos
@@ -696,7 +668,8 @@ class BaseShadowModularGrasper(VecTask):
         start_offset = end_offset
         end_offset = start_offset + self._dims.FingertipOrnDim.value
         if buf_cfg["fingertip_orn"]:
-            buf[:, start_offset:end_offset] = self.fingertip_orn.reshape(self.num_envs, self.n_tips*4)
+            buf[:, start_offset:end_offset] = self.fingertip_orn.reshape(
+                self.num_envs, self._dims.FingertipOrnDim.value)
 
         # latest actions
         start_offset = end_offset
@@ -713,8 +686,30 @@ class BaseShadowModularGrasper(VecTask):
         # tip contact forces
         start_offset = end_offset
         end_offset = start_offset + self._dims.FingerContactForceDim.value
-        if buf_cfg["tip_contact_forces"]:
-            buf[:, start_offset:end_offset] = self.net_tip_contact_forces.reshape(self.num_envs, self.n_tips*3)
+        if buf_cfg["net_tip_contact_forces"]:
+            buf[:, start_offset:end_offset] = self.net_tip_contact_forces.reshape(
+                self.num_envs, self._dims.FingerContactForceDim.value)
+
+        # tip contact positions (rich contacts enabled)
+        start_offset = end_offset
+        end_offset = start_offset + self._dims.FingertipPosDim.value
+        if buf_cfg["tip_contact_positions"]:
+            buf[:, start_offset:end_offset] = self.contact_positions.reshape(
+                self.num_envs, self._dims.FingertipPosDim.value)
+
+        # tip contact normals (rich contacts enabled)
+        start_offset = end_offset
+        end_offset = start_offset + self._dims.FingerContactForceDim.value
+        if buf_cfg["tip_contact_normals"]:
+            buf[:, start_offset:end_offset] = self.contact_normals.reshape(
+                self.num_envs, self._dims.FingerContactForceDim.value)
+
+        # tip contact force magnitudes (rich contacts enabled)
+        start_offset = end_offset
+        end_offset = start_offset + self._dims.NumFingers.value
+        if buf_cfg["tip_contact_force_mags"]:
+            buf[:, start_offset:end_offset] = self.contact_force_mags.reshape(
+                self.num_envs, self._dims.NumFingers.value)
 
         # object position
         start_offset = end_offset
@@ -774,22 +769,6 @@ class BaseShadowModularGrasper(VecTask):
 
         return start_offset, end_offset
 
-    def norm_obs_state_buffer(self):
-        if self.cfg["normalize_obs"]:
-            # for normal obs
-            self._obs_buf = scale_transform(
-                self.obs_buf,
-                lower=self._observations_scale.low,
-                upper=self._observations_scale.high
-            )
-            # for asymmetric obs
-            if self.cfg["asymmetric_obs"]:
-                self._states_buf = scale_transform(
-                    self.states_buf,
-                    lower=self._observations_scale.low,
-                    upper=self._observations_scale.high
-                )
-
     def compute_reward_and_termination(self):
         """
         Calculate the reward.
@@ -821,8 +800,14 @@ class BaseShadowModularGrasper(VecTask):
 
         self.dof_pos[env_ids_for_reset, :] = target_dof_pos
         self.dof_vel[env_ids_for_reset, :] = target_dof_vel
-
         self.target_dof_pos[env_ids_for_reset, :self.n_hand_dofs] = target_dof_pos
+
+        # reset robot fingertips state history
+        for idx in range(1, self._state_history_len):
+            self._hand_joint_pos_history[idx][env_ids_for_reset] = 0.0
+
+        # fill first sample from buffer to allow for deltas on next step
+        self._hand_joint_pos_history[0][env_ids_for_reset, :] = target_dof_pos
 
         # set DOF states to those reset
         hand_ids_int32 = self.hand_indices[env_ids_for_reset].to(torch.int32)
@@ -867,6 +852,15 @@ class BaseShadowModularGrasper(VecTask):
         self.root_state_tensor[self.obj_indices[env_ids_for_reset], 3:7] = object_orn
         self.root_state_tensor[self.obj_indices[env_ids_for_reset], 7:10] = object_linvel
         self.root_state_tensor[self.obj_indices[env_ids_for_reset], 10:13] = object_angvel
+
+        # fill first sample from buffer to allow for deltas on next step
+        self._object_base_pos_history[0][env_ids_for_reset, :] = object_pos
+        self._object_base_orn_history[0][env_ids_for_reset, :] = object_orn
+
+        # reset object state history
+        for idx in range(1, self._state_history_len):
+            self._object_base_pos_history[idx][env_ids_for_reset] = 0.0
+            self._object_base_orn_history[idx][env_ids_for_reset] = 0.0
 
     def reset_target_pose(self, goal_env_ids_for_reset):
         """
@@ -995,8 +989,10 @@ class BaseShadowModularGrasper(VecTask):
     def compute_observations(self):
 
         # get which tips are in contact
+        if self.enable_rich_contacts:
+            self.get_rich_fingertip_contacts()
+
         self.net_tip_contact_forces, self.tip_object_contacts, self.n_tip_contacts = self.get_fingertip_contacts()
-        self.get_rich_fingertip_contacts()
 
         # get tcp positions
         fingertip_states = self.rigid_body_tensor[:, self.fingertip_tcp_body_idxs, :]
@@ -1026,6 +1022,11 @@ class BaseShadowModularGrasper(VecTask):
             self.goal_kp_positions[:, i, :] = self.goal_base_pos + \
                 quat_rotate(self.goal_base_orn, self.kp_basis_vecs[i].repeat(self.num_envs, 1) * self.kp_dist)
 
+        # append observations to history stack
+        self._hand_joint_pos_history.appendleft(self.hand_joint_pos.clone())
+        self._object_base_pos_history.appendleft(self.obj_base_pos.clone())
+        self._object_base_orn_history.appendleft(self.obj_base_orn.clone())
+
     def visualise_features(self):
 
         self.gym.clear_lines(self.viewer)
@@ -1033,10 +1034,59 @@ class BaseShadowModularGrasper(VecTask):
         for i in range(self.num_envs):
 
             # draw contacts
-            if self.device == 'cpu':
+            if not self.enable_rich_contacts and self.device == 'cpu':
                 contact_color = gymapi.Vec3(1, 0, 0)
                 self.gym.draw_env_rigid_contacts(self.viewer, self.envs[i], contact_color, 0.2, True)
 
+            # draw rich contacts
+            elif self.enable_rich_contacts and self.device == 'cpu':
+
+                contact_pose = gymapi.Transform()
+                contact_pose.r = gymapi.Quat(0, 0, 0, 1)
+
+                rigid_body_poses = self.gym.get_actor_rigid_body_states(
+                    self.envs[i],
+                    self.hand_actor_handles[i],
+                    gymapi.STATE_POS
+                )['pose']
+
+                for j in range(self.n_tips):
+
+                    # get contact positions
+                    contact_position = gymapi.Vec3(
+                        self.contact_positions[i, j, 0],
+                        self.contact_positions[i, j, 1],
+                        self.contact_positions[i, j, 2]
+                    )
+                    contact_normal = gymapi.Vec3(
+                        self.contact_normals[i, j, 0],
+                        self.contact_normals[i, j, 1],
+                        self.contact_normals[i, j, 2]
+                    )
+                    # transform with tip pose
+                    tip_pose = gymapi.Transform.from_buffer(rigid_body_poses[self.tip_body_idxs[j]])
+                    contact_pose.p = tip_pose.transform_point(contact_position)
+
+                    # draw contact position
+                    gymutil.draw_lines(
+                        self.contact_geom,
+                        self.gym,
+                        self.viewer,
+                        self.envs[i],
+                        contact_pose
+                    )
+
+                    # draw contact normals
+                    gymutil.draw_line(
+                        contact_pose.p,
+                        contact_pose.p + contact_normal * self.contact_force_mags[i, j],
+                        gymapi.Vec3(1.0, 0.0, 0.0),
+                        self.gym,
+                        self.viewer,
+                        self.envs[i],
+                    )
+
+            # draw object and goal keypoints
             for j in range(self.n_keypoints):
                 pose = gymapi.Transform()
 

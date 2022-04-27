@@ -221,3 +221,200 @@ else:
         7.5*(np.pi/180),
         -10.0*(np.pi/180),
     ] * 3), device=self.device)
+
+
+# contacts
+tip_1_contact_pos, tip_2_contact_pos, tip_3_contact_pos = [], [], []
+tip_1_contact_force, tip_2_contact_force, tip_3_contact_force = [], [], []
+for contact in contacts:
+    body0 = contact['body0']
+    body1 = contact['body1']
+    tip_contact_pos = contact['localPos1']
+    force_mag = contact['lambda']
+
+    if body0 == self.obj_body_idx and body1 == self.tip_body_idxs[0]:
+        tip_1_contact_pos.append([tip_contact_pos['x'], tip_contact_pos['y'], tip_contact_pos['z']])
+        tip_1_contact_force.append(force_mag)
+    if body0 == self.obj_body_idx and body1 == self.tip_body_idxs[1]:
+        tip_2_contact_pos.append([tip_contact_pos['x'], tip_contact_pos['y'], tip_contact_pos['z']])
+        tip_2_contact_force.append(force_mag)
+    if body0 == self.obj_body_idx and body1 == self.tip_body_idxs[2]:
+        tip_3_contact_pos.append([tip_contact_pos['x'], tip_contact_pos['y'], tip_contact_pos['z']])
+        tip_3_contact_force.append(force_mag)
+
+# average contact positions and forces
+self.contact_positions[i, 0, :] = to_torch(np.array(tip_1_contact_pos).mean(axis=0))
+self.contact_positions[i, 1, :] = to_torch(np.array(tip_2_contact_pos).mean(axis=0))
+self.contact_positions[i, 2, :] = to_torch(np.array(tip_3_contact_pos).mean(axis=0))
+self.contact_force_mags[i, 0, :] = to_torch(np.array(tip_1_contact_force).mean(axis=0))
+self.contact_force_mags[i, 1, :] = to_torch(np.array(tip_2_contact_force).mean(axis=0))
+self.contact_force_mags[i, 2, :] = to_torch(np.array(tip_3_contact_force).mean(axis=0))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## ========================== Norm observations ============================
+
+    def post_physics_step(self):
+        """Compute reward and observations, reset any environments that require it."""
+        self.progress_buf += 1
+
+        self.refresh_tensors()
+        self.compute_observations()
+        self.fill_observation_buffer()
+        self.fill_states_buffer()
+        self.norm_obs_state_buffer()
+        self.compute_reward_and_termination()
+
+        if self.viewer and self.debug_viz:
+            self.visualise_features()
+
+
+    def norm_obs_state_buffer(self):
+        if self.cfg["normalize_obs"]:
+            # for normal obs
+            self._obs_buf = scale_transform(
+                self.obs_buf,
+                lower=self._observations_scale.low,
+                upper=self._observations_scale.high
+            )
+            # for asymmetric obs
+            if self.cfg["asymmetric_obs"]:
+                self._states_buf = scale_transform(
+                    self.states_buf,
+                    lower=self._observations_scale.low,
+                    upper=self._observations_scale.high
+                )
+
+    def __setup_mdp_spaces(self):
+        """
+        Configures the observations, state and action spaces.
+        """
+
+        # Action scale for the MDP
+        # Note: This is order sensitive.
+        if self.cfg["env"]["command_mode"] == "position":
+            # action space is joint positions
+            self._action_scale.low = self._robot_limits["joint_position"].low
+            self._action_scale.high = self._robot_limits["joint_position"].high
+
+        elif self.cfg["env"]["command_mode"] == "torque":
+            # action space is joint torques
+            self._action_scale.low = self._robot_limits["joint_torque"].low
+            self._action_scale.high = self._robot_limits["joint_torque"].high
+
+        else:
+            msg = f"Invalid command mode. Input: {self.cfg['env']['command_mode']} not in ['torque', 'position']."
+            raise ValueError(msg)
+
+        # Observations scale for the MDP
+        # check if policy outputs normalized action [-1, 1] or not.
+        if self.cfg["env"]["normalize_action"]:
+            obs_action_scale = SimpleNamespace(
+                low=torch.full((self.num_actions,), -1, dtype=torch.float, device=self.device),
+                high=torch.full((self.num_actions,), 1, dtype=torch.float, device=self.device)
+            )
+        else:
+            obs_action_scale = self._action_scale
+
+        # Note: This is order sensitive.
+        self._observations_scale.low = torch.cat([
+            # robot
+            self._robot_limits["joint_position"].low,
+            self._robot_limits["joint_velocity"].low,
+            self._robot_limits["fingertip_position"].low,
+            self._robot_limits["fingertip_orientation"].low,
+
+            # action
+            obs_action_scale.low,
+
+            # tactile
+            self._robot_limits["bool_tip_contacts"].low,
+            self._robot_limits["net_tip_contact_forces"].low,
+            self._robot_limits["tip_contact_positions"].low,
+            self._robot_limits["tip_contact_normals"].low,
+            self._robot_limits["tip_contact_force_mags"].low,
+
+            # object
+            self._object_limits["position"].low,
+            self._object_limits["orientation"].low,
+            self._object_limits["keypoint_position"].low,
+            self._object_limits["linear_velocity"].low,
+            self._object_limits["angular_velocity"].low,
+
+            # target
+            self._object_limits["position"].low,
+            self._object_limits["orientation"].low,
+            self._object_limits["keypoint_position"].low,
+            self._target_limits["active_quat"].low,
+            self._target_limits["pivot_axel_vector"].low,
+            self._target_limits["pivot_axel_position"].low,
+        ])
+
+        self._observations_scale.high = torch.cat([
+            # robot
+            self._robot_limits["joint_position"].high,
+            self._robot_limits["joint_velocity"].high,
+            self._robot_limits["fingertip_position"].high,
+            self._robot_limits["fingertip_orientation"].high,
+
+            # action
+            obs_action_scale.high,
+
+            # tactile
+            self._robot_limits["bool_tip_contacts"].high,
+            self._robot_limits["net_tip_contact_forces"].high,
+            self._robot_limits["tip_contact_positions"].low,
+            self._robot_limits["tip_contact_normals"].low,
+            self._robot_limits["tip_contact_force_mags"].low,
+
+            # object
+            self._object_limits["position"].high,
+            self._object_limits["orientation"].high,
+            self._object_limits["keypoint_position"].high,
+            self._object_limits["linear_velocity"].high,
+            self._object_limits["angular_velocity"].high,
+
+            # target
+            self._object_limits["position"].high,
+            self._object_limits["orientation"].high,
+            self._object_limits["keypoint_position"].high,
+            self._target_limits["active_quat"].high,
+            self._target_limits["pivot_axel_vector"].high,
+            self._target_limits["pivot_axel_position"].high,
+        ])
+
+        # check that dimensions match
+        # observations
+        if self._observations_scale.low.shape[0] != self.num_obs or self._observations_scale.high.shape[0] != self.num_obs:
+            msg = f"Observation scaling dimensions mismatch. " \
+                  f"\tLow: {self._observations_scale.low.shape[0]}, " \
+                  f"\tHigh: {self._observations_scale.high.shape[0]}, " \
+                  f"\tExpected: {self.num_obs}."
+            raise AssertionError(msg)
+
+        # actions
+        if self._action_scale.low.shape[0] != self.num_actions or self._action_scale.high.shape[0] != self.num_actions:
+            msg = f"Actions scaling dimensions mismatch. " \
+                  f"\tLow: {self._action_scale.low.shape[0]}, " \
+                  f"\tHigh: {self._action_scale.high.shape[0]}, " \
+                  f"\tExpected: {self.num_actions}."
+
+            raise AssertionError(msg)

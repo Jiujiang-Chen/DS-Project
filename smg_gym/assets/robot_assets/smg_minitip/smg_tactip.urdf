@@ -325,6 +325,7 @@
   <joint name="SMG_F1_tactip_tip_joint" type="fixed">
     <parent link="SMG_F1_tactip_body"/>
     <child link="SMG_F1_tactip_tip"/>
+    <origin rpy="1.57 0 0" xyz="0.0 0.0 0.0535"/>
   </joint>
 
   <!-- TCP -->
@@ -532,6 +533,7 @@
   <joint name="SMG_F2_tactip_tip_joint" type="fixed">
     <parent link="SMG_F2_tactip_body"/>
     <child link="SMG_F2_tactip_tip"/>
+    <origin rpy="1.57 0 0" xyz="0.0 0.0 0.0535"/>
   </joint>
 
   <!-- TCP -->
@@ -741,6 +743,7 @@
   <joint name="SMG_F3_tactip_tip_joint" type="fixed">
     <parent link="SMG_F3_tactip_body"/>
     <child link="SMG_F3_tactip_tip"/>
+    <origin rpy="1.57 0 0" xyz="0.0 0.0 0.0535"/>
   </joint>
 
   <!-- TCP -->

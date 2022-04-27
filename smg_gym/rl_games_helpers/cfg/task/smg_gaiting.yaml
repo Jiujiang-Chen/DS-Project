@@ -5,10 +5,9 @@ physics_engine: ${..physics_engine}
 
 # if given, will override the device setting in gym.
 env:
-  # num_envs: 4
   # num_envs: 1024
-  # num_envs: 4096
-  num_envs: 8192
+  num_envs: 4096
+  # num_envs: 8192
   # num_envs: 16384
 
   env_spacing: 0.5
@@ -22,6 +21,7 @@ env:
   default_pivot_axel: [0.0, 0.0, 1.0]
   clip_observations: 5.0
   clip_actions: 1.0
+  enable_rich_contacts: False
 
   # action settings
   use_sim_pd_control: True
@@ -72,7 +72,10 @@ enabled_obs:
     fingertip_orn: True
     last_action: True
     bool_tip_contacts: True
-    tip_contact_forces: True
+    net_tip_contact_forces: True
+    tip_contact_positions: True
+    tip_contact_normals: True
+    tip_contact_force_mags: True
     object_pos: True
     object_orn: True
     object_kps: True
@@ -92,7 +95,10 @@ enabled_states:
     fingertip_orn: True
     last_action: True
     bool_tip_contacts: True
-    tip_contact_forces: True
+    net_tip_contact_forces: True
+    tip_contact_positions: True
+    tip_contact_normals: True
+    tip_contact_force_mags: True
     object_pos: True
     object_orn: True
     object_kps: True
@@ -123,4 +129,4 @@ sim:
     bounce_threshold_velocity: 0.2
     max_depenetration_velocity: 1000.0
     default_buffer_size_multiplier: 5.0
-    contact_collection: 2
+    contact_collection: 1

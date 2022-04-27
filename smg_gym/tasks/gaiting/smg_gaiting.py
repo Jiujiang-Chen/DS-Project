@@ -38,6 +38,9 @@ class SMGGaiting(BaseGaiting):
             last_action: 9
             bool_tip_contacts: 3
             tip_contact_forces: 9
+            tip_contact_positions: 9
+            tip_contact_normals: 9
+            tip_contact_force_magnitudes: 3
             object_pos: 3
             object_orn: 4
             object_kps: 18
@@ -49,13 +52,13 @@ class SMGGaiting(BaseGaiting):
             active_quat: 4
             pivot_axel_vec: 3
             pivot_axel_pos: 3
-        max_total = 126
+        max_total = 147
         """
 
-        cfg["env"]["numObservations"] = 126
+        cfg["env"]["numObservations"] = 147
 
         if cfg["asymmetric_obs"]:
-            cfg["env"]["numStates"] = 126
+            cfg["env"]["numStates"] = 147
 
         cfg["env"]["numActions"] = 9
 
