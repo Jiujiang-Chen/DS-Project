@@ -82,7 +82,7 @@ env_upper = gymapi.Vec3(spacing, spacing, spacing)
 
 def load_hand():
 
-    asset_root = add_assets_path('robot_assets/smg_minitip')
+    asset_root = add_assets_path('robot_assets/smg_minitip_v2')
     asset_file = "smg_tactip.urdf"
 
     asset_options = gymapi.AssetOptions()
