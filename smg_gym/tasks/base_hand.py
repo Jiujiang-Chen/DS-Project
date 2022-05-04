@@ -1,5 +1,4 @@
 from typing import Deque
-from types import SimpleNamespace
 import numpy as np
 import os
 import torch
@@ -19,7 +18,6 @@ from pybullet_object_models import primitive_objects as object_set
 from smg_gym.tasks.base_vec_task import VecTask
 from smg_gym.utils.torch_jit_utils import randomize_rotation
 from smg_gym.utils.torch_jit_utils import saturate
-from smg_gym.utils.torch_jit_utils import scale_transform
 from smg_gym.utils.torch_jit_utils import unscale_transform
 
 from smg_gym.utils.draw_utils import get_sphere_geom

@@ -24,10 +24,9 @@ env:
   enable_rich_contacts: False
 
   # action settings
-  use_sim_pd_control: True
-  dof_speed_scale: 10.0
-
   normalize_action: True
+  dof_speed_scale: 10.0
+  use_sim_pd_control: True
   command_mode: 'position'
   # command_mode: 'torque'
   control_frequency_inv: 2
