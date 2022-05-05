@@ -16,7 +16,6 @@ env:
   # env settings
   obj_name: 'sphere'
   # obj_name: 'cube'
-  # obj_name: 'icosahedron'
 
   # action settings
   useRelativeControl: True

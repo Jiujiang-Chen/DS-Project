@@ -73,9 +73,9 @@ robot_limits = {
         # matches those on the real robot
         low=np.array([-0.785, -1.396, -1.047] * dims.NumFingers.value, dtype=np.float32),
         high=np.array([0.785, 1.047, 1.396] * dims.NumFingers.value, dtype=np.float32),
-        default=np.deg2rad([0.0, 7.5, -15.0] * dims.NumFingers.value, dtype=np.float32),
-        rand_lolim=np.deg2rad([-20.0, 7.5, -15.0] * dims.NumFingers.value, dtype=np.float32),
-        rand_uplim=np.deg2rad([20.0, 7.5, -15.0] * dims.NumFingers.value, dtype=np.float32),
+        default=np.deg2rad([0.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
+        rand_lolim=np.deg2rad([-20.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
+        rand_uplim=np.deg2rad([20.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
     ),
     "joint_velocity": SimpleNamespace(
         low=np.full(dims.JointVelocityDim.value, -max_velocity_radps, dtype=np.float32),

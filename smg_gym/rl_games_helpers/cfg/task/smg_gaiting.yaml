@@ -16,7 +16,7 @@ env:
   # env settings
   obj_name: 'sphere'
   # obj_name: 'cube'
-  # obj_name: 'icosahedron'
+
   rotateIncrementDegrees: 30
   default_pivot_axel: [0.0, 0.0, 1.0]
   clip_observations: 5.0

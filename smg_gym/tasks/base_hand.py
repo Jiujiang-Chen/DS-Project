@@ -1,6 +1,5 @@
 from typing import Deque
 import numpy as np
-import os
 import torch
 from collections import deque
 
@@ -12,8 +11,6 @@ from isaacgym.torch_utils import torch_rand_float
 from isaacgym import gymtorch
 from isaacgym import gymapi
 from isaacgym import gymutil
-
-from pybullet_object_models import primitive_objects as object_set
 
 from smg_gym.tasks.base_vec_task import VecTask
 from smg_gym.utils.torch_jit_utils import randomize_rotation
@@ -293,8 +290,8 @@ class BaseShadowModularGrasper(VecTask):
 
     def _setup_obj(self):
 
-        asset_root = object_set.getDataPath()
-        asset_file = os.path.join(self.obj_name, "model.urdf")
+        asset_root = add_assets_path("object_assets")
+        asset_file = f"{self.obj_name}.urdf"
         asset_options = gymapi.AssetOptions()
         asset_options.disable_gravity = False
         asset_options.fix_base_link = False
@@ -328,8 +325,8 @@ class BaseShadowModularGrasper(VecTask):
         self.obj_displacement_tensor = to_torch(self.default_obj_pos, dtype=torch.float, device=self.device)
 
     def _setup_goal(self):
-        asset_root = object_set.getDataPath()
-        asset_file = os.path.join(self.obj_name, "model.urdf")
+        asset_root = add_assets_path("object_assets")
+        asset_file = f"{self.obj_name}.urdf"
         asset_options = gymapi.AssetOptions()
         asset_options.disable_gravity = True
         asset_options.fix_base_link = True
@@ -473,7 +470,8 @@ class BaseShadowModularGrasper(VecTask):
 
         obj_props = self.gym.get_actor_rigid_body_properties(env_ptr, handle)
         for p in obj_props:
-            p.mass = 0.25
+            # p.mass = 0.25
+            p.mass = 0.05
             p.inertia.x = gymapi.Vec3(0.001, 0.0, 0.0)
             p.inertia.y = gymapi.Vec3(0.0, 0.001, 0.0)
             p.inertia.z = gymapi.Vec3(0.0, 0.0, 0.001)

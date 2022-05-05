@@ -277,8 +277,11 @@
 
     <collision>
       <origin rpy="0 0 0" xyz="0 0 0"/>
-      <geometry>
+      <!-- <geometry>
         <mesh filename="tip/smg_tactip_core.obj"/>
+      </geometry> -->
+      <geometry>
+        <sphere radius="0.02"/>
       </geometry>
     </collision>
   </link>
@@ -480,8 +483,11 @@
 
     <collision>
       <origin rpy="0 0 0" xyz="0 0 0"/>
-      <geometry>
+      <!-- <geometry>
         <mesh filename="tip/smg_tactip_core.obj"/>
+      </geometry> -->
+      <geometry>
+        <sphere radius="0.02"/>
       </geometry>
     </collision>
   </link>
@@ -685,8 +691,11 @@
 
     <collision>
       <origin rpy="0 0 0" xyz="0 0 0"/>
-      <geometry>
+      <!-- <geometry>
         <mesh filename="tip/smg_tactip_core.obj"/>
+      </geometry> -->
+      <geometry>
+        <sphere radius="0.02"/>
       </geometry>
     </collision>
   </link>
