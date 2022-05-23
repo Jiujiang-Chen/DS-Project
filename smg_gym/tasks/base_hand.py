@@ -56,7 +56,7 @@ class BaseShadowModularGrasper(VecTask):
 
     # History of state: Number of timesteps to save history for.
     # The length of list is the history of the state: 0: t, 1: t-1, 2: t-2, ... step.
-    _state_history_len = 1
+    _state_history_len = 2
 
     # Hand joint states list([num. of instances, num. of dofs])
     _hand_joint_pos_history: Deque[torch.Tensor] = deque(maxlen=_state_history_len)
@@ -99,7 +99,7 @@ class BaseShadowModularGrasper(VecTask):
         self._setup_tensors()
 
         # set the mdp spaces
-        self.__setup_mdp_spaces()
+        self._setup_mdp_spaces()
 
         # get indices useful for tracking contacts and fingertip positions
         self._setup_fingertip_tracking()
@@ -182,7 +182,7 @@ class BaseShadowModularGrasper(VecTask):
         self.total_successes = 0
         self.total_resets = 0
 
-    def __setup_mdp_spaces(self):
+    def _setup_mdp_spaces(self):
         """
         Configures the observations, state and action spaces.
         """
@@ -233,7 +233,7 @@ class BaseShadowModularGrasper(VecTask):
     def _create_ground_plane(self):
         plane_params = gymapi.PlaneParams()
         plane_params.normal = gymapi.Vec3(0.0, 0.0, 1.0)
-        plane_params.distance = 0
+        plane_params.distance = 0.025
         plane_params.static_friction = 0.0
         plane_params.dynamic_friction = 0.0
         plane_params.restitution = 0
@@ -318,7 +318,7 @@ class BaseShadowModularGrasper(VecTask):
         self.gym.set_asset_rigid_shape_properties(self.obj_asset, obj_props)
 
         # set initial state for the object
-        self.default_obj_pos = (0.0, 0.0, 0.265)
+        self.default_obj_pos = (0.0, 0.0, 0.26)
         self.default_obj_orn = (0.0, 0.0, 0.0, 1.0)
         self.default_obj_linvel = (0.0, 0.0, 0.0)
         self.default_obj_angvel = (0.0, 0.0, 0.1)
@@ -416,7 +416,7 @@ class BaseShadowModularGrasper(VecTask):
     def _create_hand_actor(self, env_ptr, idx):
 
         pose = gymapi.Transform()
-        pose.p = gymapi.Vec3(0.0, 0.0, 0.025)
+        pose.p = gymapi.Vec3(0.0, 0.0, 0.0)
         pose.r = gymapi.Quat(0, 0, 0, 1)
 
         self.gym.begin_aggregate(env_ptr, self.n_hand_bodies, self.n_hand_shapes, False)
@@ -938,7 +938,7 @@ class BaseShadowModularGrasper(VecTask):
         """
         Use IsaacGym PD controller for applying actions.
         """
-        new_targets = self.target_dof_pos + self.dof_speed_scale * self.dt * actions
+        new_targets = self.target_dof_pos + self.dof_speed_scale * actions
         self.target_dof_pos = saturate(
             new_targets,
             lower=self._robot_limits['joint_position'].low,
@@ -957,15 +957,18 @@ class BaseShadowModularGrasper(VecTask):
 
         elif self.cfg["env"]["command_mode"] == 'position':
 
-            new_targets = self.target_dof_pos + self.dof_speed_scale * self.dt * actions
+            new_targets = self.target_dof_pos + self.dof_speed_scale * actions
             self.target_dof_pos = saturate(
                 new_targets,
                 lower=self._robot_limits['joint_position'].low,
                 upper=self._robot_limits['joint_position'].high
             )
 
+            # calulate error (perhaps change to shortest angular distance withing limts)
+            error = self.target_dof_pos - self.dof_pos
+
             # compute torque to apply
-            computed_torque = self._robot_dof_gains["stiffness"] * (self.target_dof_pos - self.dof_pos)
+            computed_torque = self._robot_dof_gains["stiffness"] * error
             computed_torque -= self._robot_dof_gains["damping"] * self.dof_vel
 
         else:
@@ -994,12 +997,16 @@ class BaseShadowModularGrasper(VecTask):
         fingertip_states = self.rigid_body_tensor[:, self.fingertip_tcp_body_idxs, :]
         self.fingertip_pos = fingertip_states[..., 0:3].reshape(self.num_envs, 9)
         self.fingertip_orn = fingertip_states[..., 3:7]
+        self.fingertip_orn[torch.where(self.fingertip_orn[..., 3] < 0)] *= -1  # canonicalise
         self.fingertip_linvel = fingertip_states[..., 7:10]
         self.fingertip_angvel = fingertip_states[..., 10:13]
 
         # get hand joint pos and vel
         self.hand_joint_pos = self.dof_pos[:, :].squeeze()
         self.hand_joint_vel = self.dof_vel[:, :].squeeze()
+
+        # use position deltas instead of velocity tensor
+        # self.hand_joint_vel = self._hand_joint_pos_history[0] - self._hand_joint_pos_history[1]
 
         # get object pose / vel
         self.obj_base_pos = self.root_state_tensor[self.obj_indices, 0:3]

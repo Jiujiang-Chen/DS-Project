@@ -175,10 +175,10 @@
 
   <link name="SMG_F1_link_2">
     <inertial>
-      <origin xyz="0.000688458734451483 -0.00121669160147178 0.0179379664791534" rpy="0 0 0" />
-      <mass value="0.0468986964963515" />
-      <inertia ixx="1.66577929038936E-05" ixy="1.91370536767985E-09" ixz="-7.90963473136566E-07"
-               iyy="1.65880289089031E-05" iyz="-2.10962265976158E-06" izz="5.79382496615135E-06" />
+        <origin xyz="0.00197 -0.00166 0.00962" rpy="0 0 0" />
+        <mass value="0.071" />
+        <inertia ixx="0.0000351756" ixy="0.0000000072" ixz="0.00000014613"
+                 iyy="0.00003639824" iyz="-0.00000538058" izz="0.00001224172" />
     </inertial>
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
@@ -207,7 +207,6 @@
     <axis xyz="0 0 1"/>
     <parent link="SMG_F1_palm_link"/>
     <child link="SMG_F1_base_link"/>
-    <!-- <limit effort="1000" lower="-0.785398163397" upper="0.785398163397" velocity="1000"/> -->
     <limit lower="-3.14159265/4" upper="3.14159265/4" effort="2" velocity="1.0" />
     <dynamics damping="0.01"/>
   </joint>
@@ -217,7 +216,6 @@
     <axis xyz="1 0 0"/>
     <parent link="SMG_F1_base_link"/>
     <child link="SMG_F1_link_1"/>
-    <!-- <limit effort="1000" lower="-1.3962634016" upper="1.0471975512" velocity="1000"/> -->
     <limit lower="-3.14159265*80/180" upper="3.14159265/3" effort="2" velocity="1.0" />
     <dynamics damping="0.1"/>
   </joint>
@@ -227,7 +225,6 @@
     <axis xyz="1 0 0"/>
     <parent link="SMG_F1_link_1"/>
     <child link="SMG_F1_link_2"/>
-    <!-- <limit effort="1000" lower="-1.0471975512" upper="1.3962634016" velocity="1000"/> -->
     <limit lower="-3.14159265/3" upper="3.14159265*80/180" effort="2" velocity="1.0" />
     <dynamics damping="0.01"/>
   </joint>
@@ -381,10 +378,10 @@
 
   <link name="SMG_F2_link_2">
       <inertial>
-        <origin xyz="0.000688458734451483 -0.00121669160147178 0.0179379664791534" rpy="0 0 0" />
-        <mass value="0.0468986964963515" />
-        <inertia ixx="1.66577929038936E-05" ixy="1.91370536767985E-09" ixz="-7.90963473136566E-07"
-                 iyy="1.65880289089031E-05" iyz="-2.10962265976158E-06" izz="5.79382496615135E-06" />
+          <origin xyz="0.00197 -0.00166 0.00962" rpy="0 0 0" />
+          <mass value="0.071" />
+          <inertia ixx="0.0000351756" ixy="0.0000000072" ixz="0.00000014613"
+                   iyy="0.00003639824" iyz="-0.00000538058" izz="0.00001224172" />
       </inertial>
       <visual>
         <origin rpy="0 0 0" xyz="0 0 0"/>
@@ -413,7 +410,6 @@
     <axis xyz="0 0 1"/>
     <parent link="SMG_F2_palm_link"/>
     <child link="SMG_F2_base_link"/>
-    <!-- <limit effort="1000" lower="-0.785398163397" upper="0.785398163397" velocity="1000"/> -->
     <limit lower="-3.14159265/4" upper="3.14159265/4" effort="2" velocity="1.0" />
     <dynamics damping="0.01"/>
   </joint>
@@ -423,7 +419,6 @@
     <axis xyz="1 0 0"/>
     <parent link="SMG_F2_base_link"/>
     <child link="SMG_F2_link_1"/>
-    <!-- <limit effort="1000" lower="-1.3962634016" upper="1.0471975512" velocity="1000"/> -->
     <limit lower="-3.14159265*80/180" upper="3.14159265/3" effort="2" velocity="1.0" />
     <dynamics damping="0.1"/>
   </joint>
@@ -433,7 +428,6 @@
     <axis xyz="1 0 0"/>
     <parent link="SMG_F2_link_1"/>
     <child link="SMG_F2_link_2"/>
-    <!-- <limit effort="1000" lower="-1.0471975512" upper="1.3962634016" velocity="1000"/> -->
     <limit lower="-3.14159265/3" upper="3.14159265*80/180" effort="2" velocity="1.0" />
     <dynamics damping="0.01"/>
   </joint>
@@ -588,10 +582,10 @@
 
   <link name="SMG_F3_link_2">
       <inertial>
-        <origin xyz="0.000688458734451483 -0.00121669160147178 0.0179379664791534" rpy="0 0 0" />
-        <mass value="0.0468986964963515" />
-        <inertia ixx="1.66577929038936E-05" ixy="1.91370536767985E-09" ixz="-7.90963473136566E-07"
-                 iyy="1.65880289089031E-05" iyz="-2.10962265976158E-06" izz="5.79382496615135E-06" />
+          <origin xyz="0.00197 -0.00166 0.00962" rpy="0 0 0" />
+          <mass value="0.071" />
+          <inertia ixx="0.0000351756" ixy="0.0000000072" ixz="0.00000014613"
+                   iyy="0.00003639824" iyz="-0.00000538058" izz="0.00001224172" />
       </inertial>
       <visual>
         <origin rpy="0 0 0" xyz="0 0 0"/>
@@ -621,7 +615,6 @@
     <axis xyz="0 0 1"/>
     <parent link="SMG_F3_palm_link"/>
     <child link="SMG_F3_base_link"/>
-    <!-- <limit effort="1000" lower="-0.785398163397" upper="0.785398163397" velocity="1000"/> -->
     <limit lower="-3.14159265/4" upper="3.14159265/4" effort="2" velocity="1.0" />
     <dynamics damping="0.01"/>
   </joint>
@@ -631,7 +624,6 @@
     <axis xyz="1 0 0"/>
     <parent link="SMG_F3_base_link"/>
     <child link="SMG_F3_link_1"/>
-    <!-- <limit effort="1000" lower="-1.3962634016" upper="1.0471975512" velocity="1000"/> -->
     <limit lower="-3.14159265*80/180" upper="3.14159265/3" effort="2" velocity="1.0" />
     <dynamics damping="0.1"/>
   </joint>
@@ -641,7 +633,6 @@
     <axis xyz="1 0 0"/>
     <parent link="SMG_F3_link_1"/>
     <child link="SMG_F3_link_2"/>
-    <!-- <limit effort="1000" lower="-1.0471975512" upper="1.3962634016" velocity="1000"/> -->
     <limit lower="-3.14159265/3" upper="3.14159265*80/180" effort="2" velocity="1.0" />
     <dynamics damping="0.01"/>
   </joint>

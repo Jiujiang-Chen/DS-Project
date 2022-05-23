@@ -364,11 +364,12 @@ class VecTask(Env):
         self.post_physics_step()
 
         # fill time out buffer
-        self.timeout_buf = torch.where(
-            self.progress_buf >= self.max_episode_length - 1,
-            torch.ones_like(self.timeout_buf),
-            torch.zeros_like(self.timeout_buf)
-        )
+        if self.max_episode_length is not None:
+            self.timeout_buf = torch.where(
+                self.progress_buf >= self.max_episode_length - 1,
+                torch.ones_like(self.timeout_buf),
+                torch.zeros_like(self.timeout_buf)
+            )
 
         # extract the buffers to return
         self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)

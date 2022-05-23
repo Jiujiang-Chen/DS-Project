@@ -1,12 +1,12 @@
 # used to create the object
-name: smg_gaiting
+name: smg_debug
 
 physics_engine: ${..physics_engine}
 
 # if given, will override the device setting in gym.
 env:
-  # num_envs: 1024
-  num_envs: 4096
+  num_envs: 1
+  # num_envs: 4096
   # num_envs: 8192
   # num_envs: 16384
 
@@ -14,8 +14,8 @@ env:
   enable_debug_vis: True
 
   # env settings
-  # obj_name: 'sphere'
-  obj_name: 'cube'
+  obj_name: 'sphere'
+  # obj_name: 'cube'
 
   rotateIncrementDegrees: 30
   default_pivot_axel: [0.0, 0.0, 1.0]
@@ -25,7 +25,7 @@ env:
 
   # action settings
   normalize_action: False
-  dof_speed_scale: 0.05
+  dof_speed_scale: 0.02
   use_sim_pd_control: False
   command_mode: 'position'
   # command_mode: 'torque'
@@ -54,13 +54,9 @@ env:
   kp_dist_scale: 10.0
 
 rand_params:
-  randomize: True
-  rand_hand_joints: True
-  rand_obj_init_orn: True
-  rand_pivot_pos: False
-  # rand_pivot_axel: 'full_rand'
-  # rand_pivot_axel: 'cardinal'
-  rand_pivot_axel: 'none'
+  randomize: False
+  rand_hand_joints: False
+  rand_obj_init_orn: False
 
 normalize_obs: False
 asymmetric_obs: False
