@@ -52,6 +52,8 @@ class BaseGaiting(BaseShadowModularGrasper):
 
         self._setup_pivot_point()
 
+        self.domain_randomizer.get_actor_params_info(self.envs[0])
+
     def _setup_pivot_point(self):
 
         # fixed vars
@@ -111,6 +113,19 @@ class BaseGaiting(BaseShadowModularGrasper):
         """
         Logic for applying resets
         """
+
+        # If randomizing, apply on env resets
+        if self.apply_dr:
+            self.randomize_buf = self.domain_randomizer.apply_domain_randomization(
+                randomize_buf=self.randomize_buf,
+                reset_buf=self.reset_buf,
+                sim_initialized=self.sim_initialized
+            )
+            # print env params after randomisation
+            # params, names, lows, highs = self.domain_randomizer.get_actor_params_info(self.envs[0])
+            # print('')
+            # for param, name, low, high in zip(params, names, lows, highs):
+            #     print(name, param, low, high)
 
         env_ids_for_reset = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
         goal_env_ids_for_reset = self.reset_goal_buf.nonzero(as_tuple=False).squeeze(-1)

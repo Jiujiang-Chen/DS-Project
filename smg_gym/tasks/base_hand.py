@@ -29,6 +29,8 @@ from smg_gym.tasks.smg_object_task_params import control_joint_names
 from smg_gym.tasks.smg_object_task_params import max_torque_Nm
 from smg_gym.tasks.smg_object_task_params import max_velocity_radps
 
+from smg_gym.tasks.domain_randomisation import DomainRandomizer
+
 
 class BaseShadowModularGrasper(VecTask):
 
@@ -230,6 +232,25 @@ class BaseShadowModularGrasper(VecTask):
         self._create_ground_plane()
         self._create_envs(self.num_envs, self.env_spacing, int(np.sqrt(self.num_envs)))
 
+        # setup domain randomisation
+        self.apply_dr = self.cfg['domain_randomization']['randomize']
+        self.dr_params = self.cfg['domain_randomization']['dr_params']
+        self.domain_randomizer = DomainRandomizer(
+            self.sim,
+            self.gym,
+            self.envs,
+            self.dr_params,
+            self.num_envs
+        )
+
+        # If randomizing, apply once immediately on startup before the fist sim step
+        if self.apply_dr:
+            self.domain_randomizer.apply_domain_randomization(
+                randomize_buf=None,
+                reset_buf=None,
+                sim_initialized=self.sim_initialized
+            )
+
     def _create_ground_plane(self):
         plane_params = gymapi.PlaneParams()
         plane_params.normal = gymapi.Vec3(0.0, 0.0, 1.0)
@@ -388,15 +409,15 @@ class BaseShadowModularGrasper(VecTask):
             env_ptr = self.gym.create_env(self.sim, lower, upper, num_per_row)
 
             # setup hand
-            hand_actor_handle = self._create_hand_actor(env_ptr, i)
+            hand_actor_handle = self._create_hand_actor(env_ptr)
             hand_idx = self.gym.get_actor_index(env_ptr, hand_actor_handle, gymapi.DOMAIN_SIM)
 
             # setup obj
-            obj_actor_handle = self._create_obj_actor(env_ptr, i)
+            obj_actor_handle = self._create_obj_actor(env_ptr)
             obj_idx = self.gym.get_actor_index(env_ptr, obj_actor_handle, gymapi.DOMAIN_SIM)
 
             # setup goal
-            goal_actor_handle = self._create_goal_actor(env_ptr, i)
+            goal_actor_handle = self._create_goal_actor(env_ptr)
             goal_idx = self.gym.get_actor_index(env_ptr, goal_actor_handle, gymapi.DOMAIN_SIM)
 
             # append handles and indeces
@@ -413,7 +434,7 @@ class BaseShadowModularGrasper(VecTask):
         self.obj_indices = to_torch(self.obj_indices, dtype=torch.long, device=self.device)
         self.goal_indices = to_torch(self.goal_indices, dtype=torch.long, device=self.device)
 
-    def _create_hand_actor(self, env_ptr, idx):
+    def _create_hand_actor(self, env_ptr):
 
         pose = gymapi.Transform()
         pose.p = gymapi.Vec3(0.0, 0.0, 0.0)
@@ -421,7 +442,14 @@ class BaseShadowModularGrasper(VecTask):
 
         self.gym.begin_aggregate(env_ptr, self.n_hand_bodies, self.n_hand_shapes, False)
 
-        handle = self.gym.create_actor(env_ptr, self.hand_asset, pose, "hand_actor_{}".format(idx), -1, -1)
+        handle = self.gym.create_actor(
+            env_ptr,
+            self.hand_asset,
+            pose,
+            "hand",
+            -1,
+            -1
+        )
 
         # Configure DOF properties
         hand_dof_props = self.gym.get_actor_dof_properties(env_ptr, handle)
@@ -453,7 +481,7 @@ class BaseShadowModularGrasper(VecTask):
 
         return handle
 
-    def _create_obj_actor(self, env_ptr, idx):
+    def _create_obj_actor(self, env_ptr):
 
         init_obj_pose = gymapi.Transform()
         init_obj_pose.p = gymapi.Vec3(*self.default_obj_pos)
@@ -463,7 +491,7 @@ class BaseShadowModularGrasper(VecTask):
             env_ptr,
             self.obj_asset,
             init_obj_pose,
-            "obj_actor_{}".format(idx),
+            "object",
             -1,
             -1
         )
@@ -479,11 +507,18 @@ class BaseShadowModularGrasper(VecTask):
 
         return handle
 
-    def _create_goal_actor(self, env, idx):
+    def _create_goal_actor(self, env):
         init_goal_pose = gymapi.Transform()
         init_goal_pose.p = gymapi.Vec3(*self.default_goal_pos)
         init_goal_pose.r = gymapi.Quat(*self.default_goal_orn)
-        handle = self.gym.create_actor(env, self.goal_asset, init_goal_pose, "goal_actor_{}".format(idx), 0, 0)
+        handle = self.gym.create_actor(
+            env,
+            self.goal_asset,
+            init_goal_pose,
+            "goal",
+            0,
+            0
+        )
         return handle
 
     def _setup_contact_tracking(self):
@@ -612,7 +647,9 @@ class BaseShadowModularGrasper(VecTask):
 
     def post_physics_step(self):
         """Compute reward and observations, reset any environments that require it."""
+
         self.progress_buf += 1
+        self.randomize_buf += 1
 
         self.refresh_tensors()
         self.compute_observations()
@@ -868,6 +905,14 @@ class BaseShadowModularGrasper(VecTask):
         """
         Logic for applying resets
         """
+
+        # If randomizing, apply on env resets
+        if self.apply_dr:
+            self.randomize_buf = self.domain_randomizer.apply_domain_randomization(
+                randomize_buf=self.randomize_buf,
+                reset_buf=self.reset_buf,
+                sim_initialized=self.sim_initialized
+            )
 
         env_ids_for_reset = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
         goal_env_ids_for_reset = self.reset_goal_buf.nonzero(as_tuple=False).squeeze(-1)

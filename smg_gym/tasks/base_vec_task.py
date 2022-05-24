@@ -342,6 +342,9 @@ class VecTask(Env):
             msg = f"Invalid shape for tensor `action`. Input: {tuple(action.size())} != {action_shape}."
             raise ValueError(msg)
 
+        # randomize actions
+        action = self.domain_randomizer.apply_action_randomization(action)
+
         # clip actions to limits
         action = torch.clamp(action, -self.clip_actions, self.clip_actions)
 
@@ -362,6 +365,9 @@ class VecTask(Env):
 
         # compute observations, rewards, resets, ...
         self.post_physics_step()
+
+        # randomize observations
+        self.obs_buf = self.domain_randomizer.apply_observation_randomization(self.obs_buf)
 
         # fill time out buffer
         if self.max_episode_length is not None:
@@ -497,24 +503,8 @@ class VecTask(Env):
         return sim_params
 
     """
-    Domain Randomization methods
+    Properties
     """
-
-    def apply_step_randomizations(self, dr_params):
-        """Apply domain randomizations to the environment (observation noise, random force pertubations, etc).
-
-        Args:
-            dr_params: parameters for domain randomization to use.
-        """
-        pass
-
-    def apply_reset_randomizations(self, dr_params):
-        """Apply domain randomizations to the environment on reset (obj properties, physics dynamics, etc).
-
-        Args:
-            dr_params: parameters for domain randomization to use.
-        """
-        pass
 
     def get_gravity(self) -> np.ndarray:
         """Returns the gravity set in the simulator.
