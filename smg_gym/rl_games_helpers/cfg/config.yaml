@@ -23,7 +23,6 @@ max_iterations: ''
 #  'physx' or 'flex'
 physics_engine: 'physx'
 
-
 # # whether to use cpu or gpu pipeline
 # pipeline: 'cpu'
 pipeline: 'gpu'

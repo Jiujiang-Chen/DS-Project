@@ -21,10 +21,10 @@ class SMGDebug(BaseShadowModularGrasper):
         graphics_device_id,
         headless
     ):
-        cfg["env"]["numObservations"] = 147
+        cfg["env"]["numObservations"] = 174
 
         if cfg["asymmetric_obs"]:
-            cfg["env"]["numStates"] = 147
+            cfg["env"]["numStates"] = 174
 
         cfg["env"]["numActions"] = 9
 
@@ -39,6 +39,7 @@ class SMGDebug(BaseShadowModularGrasper):
         self.randomize = cfg["rand_params"]["randomize"]
         self.rand_hand_joints = cfg["rand_params"]["rand_hand_joints"]
         self.rand_obj_init_orn = cfg["rand_params"]["rand_obj_init_orn"]
+        self.rand_obj_scale = cfg["rand_params"]["rand_obj_scale"]
 
         super(SMGDebug, self).__init__(
             cfg,

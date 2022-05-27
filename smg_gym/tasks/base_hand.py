@@ -21,6 +21,7 @@ from smg_gym.utils.draw_utils import get_sphere_geom
 from smg_gym.assets import add_assets_path
 
 from smg_gym.tasks.smg_object_task_params import SMGObjectTaskDimensions
+from smg_gym.tasks.smg_object_task_params import object_properties
 from smg_gym.tasks.smg_object_task_params import robot_limits
 from smg_gym.tasks.smg_object_task_params import object_limits
 from smg_gym.tasks.smg_object_task_params import target_limits
@@ -36,6 +37,9 @@ class BaseShadowModularGrasper(VecTask):
 
     # dimensions useful for SMG hand + object tasks
     _dims = SMGObjectTaskDimensions
+
+    # properties of objects
+    _object_properties = object_properties
 
     # limits of the robot (mapped later: str -> torch.tensor)
     _robot_limits = robot_limits
@@ -83,11 +87,20 @@ class BaseShadowModularGrasper(VecTask):
         self.debug_viz = cfg["env"]["enable_debug_vis"]
         self.env_spacing = cfg["env"]["env_spacing"]
         self.obj_name = cfg["env"]["obj_name"]
-        self.enable_rich_contacts = cfg["env"]["enable_rich_contacts"]
 
-        # TODO: action params
+        # contact sensing
+        self.enable_dof_force_sensors = cfg["env"]["enable_dof_force_sensors"]
+        self.contact_sensor_modality = cfg["env"]["contact_sensor_modality"]
+
+        # action params
         self.use_sim_pd_control = cfg["env"]["use_sim_pd_control"]
         self.dof_speed_scale = cfg["env"]["dof_speed_scale"]
+
+        # shared task randomisation params
+        self.randomize = cfg["rand_params"]["randomize"]
+        self.rand_hand_joints = cfg["rand_params"]["rand_hand_joints"]
+        self.rand_obj_init_orn = cfg["rand_params"]["rand_obj_init_orn"]
+        self.rand_obj_scale = cfg["rand_params"]["rand_obj_scale"]
 
         super().__init__(config=cfg, sim_device=sim_device, graphics_device_id=graphics_device_id, headless=headless)
 
@@ -102,10 +115,6 @@ class BaseShadowModularGrasper(VecTask):
 
         # set the mdp spaces
         self._setup_mdp_spaces()
-
-        # get indices useful for tracking contacts and fingertip positions
-        self._setup_fingertip_tracking()
-        self._setup_contact_tracking()
 
         # inialize buffers that store history of observations
         self.initialize_state_history_buffers()
@@ -150,6 +159,12 @@ class BaseShadowModularGrasper(VecTask):
         rigid_body_tensor = self.gym.acquire_rigid_body_state_tensor(self.sim)
         contact_force_tensor = self.gym.acquire_net_contact_force_tensor(self.sim)
 
+        if self.enable_dof_force_sensors:
+            dof_force_tensor = self.gym.acquire_dof_force_tensor(self.sim)
+
+        if self.contact_sensor_modality == 'ft_sensor':
+            force_sensor_tensor = self.gym.acquire_force_sensor_tensor(self.sim)
+
         # get useful numbers
         self.n_sim_bodies = self.gym.get_sim_rigid_body_count(self.sim)
         self.n_env_bodies = self.gym.get_sim_rigid_body_count(self.sim) // self.num_envs
@@ -171,6 +186,24 @@ class BaseShadowModularGrasper(VecTask):
         # create views of contact_force tensor
         # default shape = (n_envs, n_bodies * 3)
         self.contact_force_tensor = gymtorch.wrap_tensor(contact_force_tensor).view(self.num_envs, self.n_env_bodies, 3)
+
+        if self.contact_sensor_modality == 'ft_sensor':
+            self.force_sensor_tensor = gymtorch.wrap_tensor(force_sensor_tensor).view(
+                self.num_envs, self._dims.NumFingers.value, self._dims.WrenchDim.value
+            )
+        else:
+            self.force_sensor_tensor = torch.zeros(
+                size=(self.num_envs, self._dims.NumFingers.value, self._dims.WrenchDim.value)
+            )
+
+        if self.enable_dof_force_sensors:
+            self.dof_force_tensor = gymtorch.wrap_tensor(dof_force_tensor).view(
+                self.num_envs, self._dims.JointTorqueDim.value
+            )
+        else:
+            self.dof_force_tensor = torch.zeros(
+                size=(self.num_envs, self._dims.JointTorqueDim.value)
+            )
 
         # setup useful incices
         self.x_unit_tensor = to_torch([1, 0, 0], dtype=torch.float, device=self.device).repeat((self.num_envs, 1))
@@ -272,12 +305,11 @@ class BaseShadowModularGrasper(VecTask):
         asset_options.override_com = True
         asset_options.override_inertia = True
         asset_options.collapse_fixed_joints = False
-        asset_options.thickness = 0.0001
+        asset_options.thickness = 0.001
         asset_options.mesh_normal_mode = gymapi.COMPUTE_PER_VERTEX
-        asset_options.convex_decomposition_from_submeshes = False
-        asset_options.vhacd_enabled = False
         asset_options.flip_visual_attachments = False
-
+        asset_options.convex_decomposition_from_submeshes = True
+        asset_options.vhacd_enabled = False
         asset_options.armature = 0.00001
         if self.physics_engine == gymapi.SIM_PHYSX:
             asset_options.use_physx_armature = True
@@ -289,12 +321,26 @@ class BaseShadowModularGrasper(VecTask):
 
         self.hand_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
 
-        hand_shape_props = self.gym.get_asset_rigid_shape_properties(self.hand_asset)
-        for p in hand_shape_props:
-            p.friction = 1.0
+        # set default hand link properties
+        hand_props = self.gym.get_asset_rigid_shape_properties(self.hand_asset)
+        for p in hand_props:
+            p.friction = 0.01
+            p.torsion_friction = 0.01
+            p.restitution = 0.0
+            # p.rolling_friction = 0.1
+            # p.thickness = 0.001
+
+        # TODO: remove hardcoded tip indices (be careful of merged fixed links)
+        # set the tip dynamics
+        tip_shape_indices = [7, 14, 21]
+        for idx in tip_shape_indices:
+            p = hand_props[idx]
+            p.friction = 2.0
             p.torsion_friction = 1.0
-            p.restitution = 0.8
-        self.gym.set_asset_rigid_shape_properties(self.hand_asset, hand_shape_props)
+            p.restitution = 0.0
+            # p.rolling_friction = 0.1
+            # p.thickness = 0.001
+        self.gym.set_asset_rigid_shape_properties(self.hand_asset, hand_props)
 
         self.control_joint_dof_indices = [
             self.gym.find_asset_dof_index(self.hand_asset, name) for name in self._control_joint_names
@@ -309,10 +355,39 @@ class BaseShadowModularGrasper(VecTask):
         # target tensor for updating
         self.target_dof_pos = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
 
+    def _choose_env_object(self):
+
+        if self.obj_name == 'rand':
+            self.env_obj_choice = np.random.choice(['sphere', 'box'])
+        else:
+            self.env_obj_choice = self.obj_name
+
+        if self.env_obj_choice == 'sphere':
+            self.env_obj_color = gymapi.Vec3(1, 0, 0)
+            if self.rand_obj_scale:
+                self.sphere_radius = np.random.uniform(
+                    self._object_properties[self.env_obj_choice]['radius_llim'],
+                    self._object_properties[self.env_obj_choice]['radius_ulim']
+                )
+            else:
+                self.sphere_radius = self._object_properties[self.env_obj_choice]['radius']
+
+        elif self.env_obj_choice == 'box':
+            self.env_obj_color = gymapi.Vec3(0, 0, 1)
+            if self.rand_obj_scale:
+                self.box_size = np.random.uniform(
+                    self._object_properties[self.env_obj_choice]['size_llims'],
+                    self._object_properties[self.env_obj_choice]['size_ulims']
+                )
+            else:
+                self.box_size = self._object_properties[self.env_obj_choice]['size']
+
+        else:
+            msg = f"Invalid object specified. Input: {self.obj_name} not in ['sphere', 'box', 'rand']."
+            raise ValueError(msg)
+
     def _setup_obj(self):
 
-        asset_root = add_assets_path("object_assets")
-        asset_file = f"{self.obj_name}.urdf"
         asset_options = gymapi.AssetOptions()
         asset_options.disable_gravity = False
         asset_options.fix_base_link = False
@@ -322,38 +397,68 @@ class BaseShadowModularGrasper(VecTask):
         asset_options.linear_damping = 0.0
         asset_options.max_linear_velocity = 10.0
         asset_options.max_angular_velocity = 5.0
-        asset_options.thickness = 0.0
+        asset_options.thickness = 0.001
         asset_options.convex_decomposition_from_submeshes = True
         asset_options.flip_visual_attachments = False
         asset_options.vhacd_enabled = False
-        self.obj_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
+
+        if self.env_obj_choice == 'sphere':
+            self.obj_asset = self.gym.create_sphere(
+                self.sim,
+                self.sphere_radius,
+                asset_options
+            )
+        elif self.env_obj_choice == 'box':
+            self.obj_asset = self.gym.create_box(
+                self.sim,
+                self.box_size[0],
+                self.box_size[1],
+                self.box_size[2],
+                asset_options
+            )
 
         # set object properties
         obj_props = self.gym.get_asset_rigid_shape_properties(self.obj_asset)
         for p in obj_props:
             p.friction = 2.0
-            p.torsion_friction = 0.001
-            p.rolling_friction = 0.0
+            p.torsion_friction = 1.0
             p.restitution = 0.0
-            p.thickness = 0.0
+            # p.rolling_friction = 0.0
+            # p.thickness = 0.001
         self.gym.set_asset_rigid_shape_properties(self.obj_asset, obj_props)
 
         # set initial state for the object
-        self.default_obj_pos = (0.0, 0.0, 0.26)
+        self.default_obj_pos = (0.0, -0.015, 0.25)
         self.default_obj_orn = (0.0, 0.0, 0.0, 1.0)
         self.default_obj_linvel = (0.0, 0.0, 0.0)
         self.default_obj_angvel = (0.0, 0.0, 0.1)
         self.obj_displacement_tensor = to_torch(self.default_obj_pos, dtype=torch.float, device=self.device)
 
     def _setup_goal(self):
-        asset_root = add_assets_path("object_assets")
-        asset_file = f"{self.obj_name}.urdf"
         asset_options = gymapi.AssetOptions()
         asset_options.disable_gravity = True
         asset_options.fix_base_link = True
         asset_options.override_com = True
         asset_options.override_inertia = True
-        self.goal_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
+
+        # asset_root = add_assets_path("object_assets")
+        # asset_file = f"{self.obj_name}.urdf"
+        # self.goal_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
+
+        if self.env_obj_choice == 'sphere':
+            self.goal_asset = self.gym.create_sphere(
+                self.sim,
+                self.sphere_radius,
+                asset_options
+            )
+        elif self.env_obj_choice == 'box':
+            self.goal_asset = self.gym.create_box(
+                self.sim,
+                self.box_size[0],
+                self.box_size[1],
+                self.box_size[2],
+                asset_options
+            )
 
         # set initial state of goal
         self.default_goal_pos = (-0.2, -0.06, 0.4)
@@ -389,11 +494,13 @@ class BaseShadowModularGrasper(VecTask):
         lower = gymapi.Vec3(-spacing, -spacing, 0.0)
         upper = gymapi.Vec3(spacing, spacing, spacing)
 
-        # create assets and variables
+        # create assets and variables that are fixed per env
         self._setup_hand()
-        self._setup_obj()
         self._setup_keypoints()
-        self._setup_goal()
+
+        # get indices useful for tracking contacts and fingertip positions
+        self._setup_fingertip_tracking()
+        self._setup_contact_tracking()
 
         # collect useful indeces and handles
         self.envs = []
@@ -405,6 +512,12 @@ class BaseShadowModularGrasper(VecTask):
         self.goal_indices = []
 
         for i in range(self.num_envs):
+
+            # create assets and variables that change per env
+            self._choose_env_object()
+            self._setup_obj()
+            self._setup_goal()
+
             # create env instance
             env_ptr = self.gym.create_env(self.sim, lower, upper, num_per_row)
 
@@ -451,6 +564,10 @@ class BaseShadowModularGrasper(VecTask):
             -1
         )
 
+        # enable joint force sensors
+        if self.enable_dof_force_sensors:
+            self.gym.enable_actor_dof_force_sensors(env_ptr, handle)
+
         # Configure DOF properties
         hand_dof_props = self.gym.get_actor_dof_properties(env_ptr, handle)
 
@@ -474,6 +591,7 @@ class BaseShadowModularGrasper(VecTask):
             hand_dof_props['velocity'][dof_index] = self._max_velocity_radps
             hand_dof_props['lower'][dof_index] = float(self._robot_limits["joint_position"].low[dof_index])
             hand_dof_props['upper'][dof_index] = float(self._robot_limits["joint_position"].high[dof_index])
+            hand_dof_props['friction'][dof_index] = float(self._robot_dof_gains["friction"][dof_index])
 
         self.gym.set_actor_dof_properties(env_ptr, handle, hand_dof_props)
 
@@ -505,27 +623,61 @@ class BaseShadowModularGrasper(VecTask):
             p.inertia.z = gymapi.Vec3(0.0, 0.0, 0.001)
         self.gym.set_actor_rigid_body_properties(env_ptr, handle, obj_props)
 
+        # set color of object
+        self.gym.set_rigid_body_color(
+            env_ptr,
+            handle,
+            0,
+            gymapi.MESH_VISUAL,
+            self.env_obj_color
+        )
+
+        obj_body_name = self.gym.get_actor_rigid_body_names(env_ptr, handle)
+        self.obj_body_idx = self.gym.find_actor_rigid_body_index(env_ptr, handle, obj_body_name[0], gymapi.DOMAIN_ENV)
+
         return handle
 
-    def _create_goal_actor(self, env):
+    def _create_goal_actor(self, env_ptr):
         init_goal_pose = gymapi.Transform()
         init_goal_pose.p = gymapi.Vec3(*self.default_goal_pos)
         init_goal_pose.r = gymapi.Quat(*self.default_goal_orn)
         handle = self.gym.create_actor(
-            env,
+            env_ptr,
             self.goal_asset,
             init_goal_pose,
             "goal",
             0,
             0
         )
+        # set color of object
+        self.gym.set_rigid_body_color(
+            env_ptr,
+            handle,
+            0,
+            gymapi.MESH_VISUAL,
+            self.env_obj_color
+        )
         return handle
 
     def _setup_contact_tracking(self):
         self.n_tips = 3
-        self.obj_body_idx, self.tip_body_idxs = self._get_contact_idxs(
-            self.envs[0], self.obj_actor_handles[0], self.hand_actor_handles[0]
-        )
+
+        hand_body_names = self.gym.get_asset_rigid_body_names(self.hand_asset)
+        tip_body_names = [name for name in hand_body_names if "tactip_tip" in name]
+        self.tip_body_idxs = [
+            self.gym.find_asset_rigid_body_index(self.hand_asset, name) for name in tip_body_names
+        ]
+
+        # add ft sensors to fingertips
+        if self.contact_sensor_modality == 'ft_sensor':
+            sensor_pose = gymapi.Transform()
+
+            for idx in self.tip_body_idxs:
+                sensor_options = gymapi.ForceSensorProperties()
+                sensor_options.enable_forward_dynamics_forces = False  # for example gravity
+                sensor_options.enable_constraint_solver_forces = True  # for example contacts
+                sensor_options.use_world_frame = True
+                self.gym.create_asset_force_sensor(self.hand_asset, idx, sensor_pose, sensor_options)
 
         # rich contacts
         self.contact_positions = torch.zeros(
@@ -537,74 +689,14 @@ class BaseShadowModularGrasper(VecTask):
 
         self.contact_geom = get_sphere_geom(rad=0.0025, color=(1, 1, 1))
 
-    def _get_contact_idxs(self, env, obj_actor_handle, hand_actor_handle):
-
-        obj_body_name = self.gym.get_actor_rigid_body_names(env, obj_actor_handle)
-        obj_body_idx = self.gym.find_actor_rigid_body_index(env, obj_actor_handle, obj_body_name[0], gymapi.DOMAIN_ENV)
-
-        hand_body_names = self.gym.get_actor_rigid_body_names(env, hand_actor_handle)
-        tip_body_names = [name for name in hand_body_names if "tactip_tip" in name]
-        tip_body_idxs = [
-            self.gym.find_actor_rigid_body_index(env, hand_actor_handle, name, gymapi.DOMAIN_ENV) for name in tip_body_names
-        ]
-
-        return obj_body_idx, tip_body_idxs
-
     def _setup_fingertip_tracking(self):
-        self.fingertip_tcp_body_idxs = self._get_fingertip_tcp_idxs(self.envs[0], self.hand_actor_handles[0])
 
-    def _get_fingertip_tcp_idxs(self, env, hand_actor_handle):
-
-        hand_body_names = self.gym.get_actor_rigid_body_names(env, hand_actor_handle)
+        # hand_body_names = self.gym.get_actor_rigid_body_names(env, hand_actor_handle)
+        hand_body_names = self.gym.get_asset_rigid_body_names(self.hand_asset)
         tcp_body_names = [name for name in hand_body_names if "tcp" in name]
-        fingertip_tcp_body_idxs = [
-            self.gym.find_actor_rigid_body_index(env, hand_actor_handle, name, gymapi.DOMAIN_ENV) for name in tcp_body_names
+        self.fingertip_tcp_body_idxs = [
+            self.gym.find_asset_rigid_body_index(self.hand_asset, name) for name in tcp_body_names
         ]
-
-        return fingertip_tcp_body_idxs
-
-    def get_rich_fingertip_contacts(self):
-        """
-        Contact Properties
-            'env0', 'env1',
-            'body0', 'body1',
-            'localPos0', 'localPos1',
-            'minDist',
-            'initialOverlap',
-            'normal',
-            'offset0', 'offset1',
-            'lambda',
-            'lambdaFriction',
-            'friction',
-            'torsionFriction',
-            'rollingFriction'
-        """
-        if self.device != 'cpu':
-            raise ValueError("Rich contacts not available with GPU pipeline.")
-
-        # iterate through environment to pull all contact info
-        for i in range(self.num_envs):
-            contacts = self.gym.get_env_rigid_contacts(self.envs[i])
-
-            # accumulate all contacts within an environment
-            for j, tip_body_idx in enumerate(self.tip_body_idxs):
-                tip_contacts = contacts[np.where(
-                    (contacts['body0'] == self.obj_body_idx)
-                    & (contacts['body1'] == tip_body_idx)
-                )]
-                self.contact_positions[i, j, :] = to_torch([
-                    tip_contacts['localPos1']['x'].mean() if len(tip_contacts['localPos1']['x']) > 0 else 0.0,
-                    tip_contacts['localPos1']['y'].mean() if len(tip_contacts['localPos1']['y']) > 0 else 0.0,
-                    tip_contacts['localPos1']['z'].mean() if len(tip_contacts['localPos1']['z']) > 0 else 0.0
-                ], device=self.device)
-                self.contact_normals[i, j, :] = to_torch([
-                    tip_contacts['normal']['x'].mean() if len(tip_contacts['normal']['x']) > 0 else 0.0,
-                    tip_contacts['normal']['y'].mean() if len(tip_contacts['normal']['y']) > 0 else 0.0,
-                    tip_contacts['normal']['z'].mean() if len(tip_contacts['normal']['z']) > 0 else 0.0
-                ], device=self.device)
-                self.contact_force_mags[i, j, :] = to_torch([
-                    tip_contacts['lambda'].mean() if len(tip_contacts['lambda']) > 0 else 0.0
-                ], device=self.device)
 
     def get_fingertip_contacts(self):
 
@@ -635,6 +727,56 @@ class BaseShadowModularGrasper(VecTask):
         n_tip_contacts = torch.sum(bool_tip_contacts, dim=1)
 
         return net_tip_contact_forces, tip_object_contacts, n_tip_contacts
+
+    def get_rich_fingertip_contacts(self):
+        """
+        Contact Properties
+            'env0', 'env1',
+            'body0', 'body1',
+            'localPos0', 'localPos1',
+            'minDist',
+            'initialOverlap',
+            'normal',
+            'offset0', 'offset1',
+            'lambda',
+            'lambdaFriction',
+            'friction',
+            'torsionFriction',
+            'rollingFriction'
+        """
+        if self.device != 'cpu':
+            raise ValueError("Rich contacts not available with GPU pipeline.")
+
+        # iterate through environment to pull all contact info
+        for i in range(self.num_envs):
+            contacts = self.gym.get_env_rigid_contacts(self.envs[i])
+
+            # print('')
+            # print(contacts['lambda'])
+            # print(contacts['friction'])
+            # print(contacts['lambdaFriction'])
+            # print(contacts['torsionFriction'])
+            # print(contacts['rollingFriction'])
+
+            # accumulate all contacts within an environment
+            for j, tip_body_idx in enumerate(self.tip_body_idxs):
+                tip_contacts = contacts[np.where(
+                    (contacts['body0'] == self.obj_body_idx)
+                    & (contacts['body1'] == tip_body_idx)
+                )]
+                self.contact_positions[i, j, :] = to_torch([
+                    tip_contacts['localPos1']['x'].mean() if len(tip_contacts['localPos1']['x']) > 0 else 0.0,
+                    tip_contacts['localPos1']['y'].mean() if len(tip_contacts['localPos1']['y']) > 0 else 0.0,
+                    tip_contacts['localPos1']['z'].mean() if len(tip_contacts['localPos1']['z']) > 0 else 0.0
+                ], device=self.device)
+                self.contact_normals[i, j, :] = to_torch([
+                    tip_contacts['normal']['x'].mean() if len(tip_contacts['normal']['x']) > 0 else 0.0,
+                    tip_contacts['normal']['y'].mean() if len(tip_contacts['normal']['y']) > 0 else 0.0,
+                    tip_contacts['normal']['z'].mean() if len(tip_contacts['normal']['z']) > 0 else 0.0
+                ], device=self.device)
+                self.contact_force_mags[i, j, :] = to_torch([
+                    tip_contacts['lambda'].mean() if len(tip_contacts['lambda']) > 0 else 0.0
+                ], device=self.device)
 
     def pre_physics_step(self):
         """Apply the actions to the environment (eg by setting torques, position targets).
@@ -669,6 +811,12 @@ class BaseShadowModularGrasper(VecTask):
         self.gym.refresh_rigid_body_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
 
+        if self.contact_sensor_modality == 'ft_sensor':
+            self.gym.refresh_force_sensor_tensor(self.sim)
+
+        if self.enable_dof_force_sensors:
+            self.gym.refresh_dof_force_tensor(self.sim)
+
     def standard_fill_buffer(self, buf, buf_cfg):
         """
         Fill observation buffer with observations shared across different tasks.
@@ -690,6 +838,12 @@ class BaseShadowModularGrasper(VecTask):
         end_offset = start_offset + self._dims.JointVelocityDim.value
         if buf_cfg["joint_vel"]:
             buf[:, start_offset:end_offset] = self.hand_joint_vel
+
+        # joint dof force
+        start_offset = end_offset
+        end_offset = start_offset + self._dims.JointTorqueDim.value
+        if buf_cfg["joint_dof_force"]:
+            buf[:, start_offset:end_offset] = self.dof_force_tensor
 
         # fingertip positions
         start_offset = end_offset
@@ -722,6 +876,20 @@ class BaseShadowModularGrasper(VecTask):
         if buf_cfg["net_tip_contact_forces"]:
             buf[:, start_offset:end_offset] = self.net_tip_contact_forces.reshape(
                 self.num_envs, self._dims.FingerContactForceDim.value)
+
+        # tip contact forces (ft sensors enabled)
+        start_offset = end_offset
+        end_offset = start_offset + self._dims.FingerContactForceDim.value
+        if buf_cfg["ft_sensor_contact_forces"]:
+            buf[:, start_offset:end_offset] = self.force_sensor_tensor[:, :, 0:3].reshape(
+                self.num_envs, self._dims.FingerContactForceDim.value)
+
+        # tip contact torques (ft sensors enabled)
+        start_offset = end_offset
+        end_offset = start_offset + self._dims.FingerContactTorqueDim.value
+        if buf_cfg["ft_sensor_contact_torques"]:
+            buf[:, start_offset:end_offset] = self.force_sensor_tensor[:, :, 3:6].reshape(
+                self.num_envs, self._dims.FingerContactTorqueDim.value)
 
         # tip contact positions (rich contacts enabled)
         start_offset = end_offset
@@ -930,9 +1098,9 @@ class BaseShadowModularGrasper(VecTask):
 
         # reset envs
         if len(env_ids_for_reset) > 0:
+            self.reset_object(env_ids_for_reset)
             self.reset_hand(env_ids_for_reset)
             self.reset_target_pose(env_ids_for_reset)
-            self.reset_object(env_ids_for_reset)
             actor_root_state_reset_indices.append(self.obj_indices[env_ids_for_reset])
             actor_root_state_reset_indices.append(self.goal_indices[env_ids_for_reset])
 
@@ -1033,10 +1201,17 @@ class BaseShadowModularGrasper(VecTask):
     def compute_observations(self):
 
         # get which tips are in contact
-        if self.enable_rich_contacts:
+        if self.contact_sensor_modality == 'rich_cpu':
             self.get_rich_fingertip_contacts()
 
         self.net_tip_contact_forces, self.tip_object_contacts, self.n_tip_contacts = self.get_fingertip_contacts()
+
+        # print('')
+        # print('force sensor contact')
+        # print(torch.norm(self.force_sensor_tensor[:, :, 0:3], p=2, dim=2))
+        #
+        # print('Net contact')
+        # print(torch.norm(self.net_tip_contact_forces, p=2, dim=2))
 
         # get tcp positions
         fingertip_states = self.rigid_body_tensor[:, self.fingertip_tcp_body_idxs, :]
@@ -1081,13 +1256,8 @@ class BaseShadowModularGrasper(VecTask):
 
         for i in range(self.num_envs):
 
-            # draw contacts
-            if not self.enable_rich_contacts and self.device == 'cpu':
-                contact_color = gymapi.Vec3(1, 0, 0)
-                self.gym.draw_env_rigid_contacts(self.viewer, self.envs[i], contact_color, 0.2, True)
-
             # draw rich contacts
-            elif self.enable_rich_contacts and self.device == 'cpu':
+            if self.contact_sensor_modality == 'rich_cpu' and self.device == 'cpu':
 
                 contact_pose = gymapi.Transform()
                 contact_pose.r = gymapi.Quat(0, 0, 0, 1)
@@ -1133,6 +1303,38 @@ class BaseShadowModularGrasper(VecTask):
                         self.viewer,
                         self.envs[i],
                     )
+
+            # draw ft sensor contacts
+            elif self.contact_sensor_modality == 'ft_sensor' and self.device == 'cpu':
+
+                rigid_body_poses = self.gym.get_actor_rigid_body_states(
+                    self.envs[i],
+                    self.hand_actor_handles[i],
+                    gymapi.STATE_POS
+                )['pose']
+
+                for j in range(self.n_tips):
+                    tip_pose = gymapi.Transform.from_buffer(rigid_body_poses[self.tip_body_idxs[j]])
+
+                    contact_force = gymapi.Vec3(
+                        self.force_sensor_tensor[i, j, 0],
+                        self.force_sensor_tensor[i, j, 1],
+                        self.force_sensor_tensor[i, j, 2]
+                    )
+
+                    gymutil.draw_line(
+                        tip_pose.p,
+                        tip_pose.p + contact_force,
+                        gymapi.Vec3(1.0, 0.0, 0.0),
+                        self.gym,
+                        self.viewer,
+                        self.envs[i],
+                    )
+
+            # draw default contacts
+            elif self.device == 'cpu':
+                contact_color = gymapi.Vec3(1, 0, 0)
+                self.gym.draw_env_rigid_contacts(self.viewer, self.envs[i], contact_color, 0.2, True)
 
             # draw object and goal keypoints
             for j in range(self.n_keypoints):

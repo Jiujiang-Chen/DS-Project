@@ -38,7 +38,7 @@ def compute_hybrid_reorient_reward(
     # Distance from the hand to the object
     goal_dist = torch.norm(obj_base_pos - targ_base_pos, p=2, dim=-1)
 
-    # Orientation alignment for the cube in hand and goal cube
+    # Orientation alignment for the object in hand and goal object
     quat_diff = quat_mul(obj_base_orn, quat_conjugate(targ_base_orn))
     rot_dist = 2.0 * torch.asin(torch.clamp(torch.norm(quat_diff[:, 0:3], p=2, dim=-1), max=1.0))
 
@@ -123,7 +123,8 @@ def compute_keypoint_reorient_reward(
     # Distance from the pivot point to the object base
     kp_deltas = torch.norm(obj_kps - goal_kps, p=2, dim=-1)
     min_kp_dist, _ = kp_deltas.min(dim=-1)
-    max_kp_dist, _ = kp_deltas.max(dim=-1)
+    # max_kp_dist, _ = kp_deltas.max(dim=-1)
+    mean_kp_dist = kp_deltas.mean(dim=-1)
 
     # bound and scale rewards such that they are in similar ranges
     kp_dist_rew = lgsk_kernel(kp_deltas, scale=lgsk_scale, eps=lgsk_eps).mean(dim=-1) * kp_dist_scale
@@ -142,13 +143,13 @@ def compute_keypoint_reorient_reward(
         total_reward = torch.where(n_tip_contacts < 2, torch.zeros_like(rew_buf), total_reward)
 
     # Success bonus: orientation is within `success_tolerance` of goal orientation
-    total_reward = torch.where(max_kp_dist <= success_tolerance, total_reward + reach_goal_bonus, total_reward)
+    total_reward = torch.where(mean_kp_dist <= success_tolerance, total_reward + reach_goal_bonus, total_reward)
 
     # Fall penalty: distance to the goal is larger than a threashold
     total_reward = torch.where(min_kp_dist >= fall_reset_dist, total_reward + fall_penalty, total_reward)
 
     # Find out which envs hit the goal and update successes count
-    goal_resets = torch.where(max_kp_dist <= success_tolerance, torch.ones_like(reset_goal_buf), reset_goal_buf)
+    goal_resets = torch.where(mean_kp_dist <= success_tolerance, torch.ones_like(reset_goal_buf), reset_goal_buf)
     successes = successes + goal_resets
 
     # Check env termination conditions, including maximum success number

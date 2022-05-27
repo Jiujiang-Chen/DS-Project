@@ -15,18 +15,22 @@ env:
 
   # env settings
   obj_name: 'sphere'
-  # obj_name: 'cube'
+  # obj_name: 'box'
+  # obj_name: 'rand'
 
   rotateIncrementDegrees: 30
   default_pivot_axel: [0.0, 0.0, 1.0]
   clip_observations: 5.0
   clip_actions: 1.0
-  enable_rich_contacts: False
+
+  enable_dof_force_sensors: True
+  contact_sensor_modality: 'ft_sensor'
+  # contact_sensor_modality: 'rich_cpu'
 
   # action settings
   normalize_action: False
   dof_speed_scale: 0.02
-  use_sim_pd_control: False
+  use_sim_pd_control: True
   command_mode: 'position'
   # command_mode: 'torque'
   control_frequency_inv: 2
@@ -57,20 +61,34 @@ rand_params:
   randomize: False
   rand_hand_joints: False
   rand_obj_init_orn: False
+  rand_obj_scale: True
 
 normalize_obs: False
 asymmetric_obs: False
 enabled_obs:
+
+    # proprio
     joint_pos: True
     joint_vel: True
+    joint_dof_force: True
     fingertip_pos: True
     fingertip_orn: True
     last_action: True
+
+    # default contacts
     bool_tip_contacts: True
     net_tip_contact_forces: True
+
+    # ft sensor contacts req
+    ft_sensor_contact_forces: True
+    ft_sensor_contact_torques: True
+
+    # rich contacts req
     tip_contact_positions: True
     tip_contact_normals: True
     tip_contact_force_mags: True
+
+    # privaliged object
     object_pos: True
     object_orn: True
     object_kps: True
@@ -80,20 +98,34 @@ enabled_obs:
     goal_orn: True
     goal_kps: True
     active_quat: True
+
+    # task specific conditioning
     pivot_axel_vec: True
     pivot_axel_pos: True
 
 enabled_states:
+    # proprio
     joint_pos: True
     joint_vel: True
+    joint_dof_force: True
     fingertip_pos: True
     fingertip_orn: True
     last_action: True
+
+    # default contacts
     bool_tip_contacts: True
     net_tip_contact_forces: True
+
+    # ft sensor contacts req
+    ft_sensor_contact_forces: True
+    ft_sensor_contact_torques: True
+
+    # rich contacts req
     tip_contact_positions: True
     tip_contact_normals: True
     tip_contact_force_mags: True
+
+    # privaliged object
     object_pos: True
     object_orn: True
     object_kps: True
@@ -103,6 +135,8 @@ enabled_states:
     goal_orn: True
     goal_kps: True
     active_quat: True
+
+    # task specific conditioning
     pivot_axel_vec: True
     pivot_axel_pos: True
 
@@ -125,3 +159,33 @@ sim:
     max_depenetration_velocity: 1000.0
     default_buffer_size_multiplier: 5.0
     contact_collection: 1
+
+domain_randomization:
+  randomize: False
+  dr_params:
+
+    frequency: 1000   # Define how many simulation steps between generating new randomizations
+
+    observations:
+      range: [0, .002] # range for the white noise
+      range_correlated: [0, .000 ] # range for correlated noise, refreshed with freq `frequency`
+      operation: "additive"
+      distribution: "gaussian"
+
+    actions:
+      range: [0., .01]
+      range_correlated: [0, .005] # range for correlated noise, refreshed with freq `frequency`
+      operation: "additive"
+      distribution: "gaussian"
+
+    sim_params:
+      gravity:
+        range: [0, 0.4]
+        operation: "additive"
+        distribution: "gaussian"
+        # schedule: "linear"  # "linear" will linearly interpolate between no rand and max rand
+        # schedule_steps: 40000
+
+    actor_params:
+      hand:
+        color: True

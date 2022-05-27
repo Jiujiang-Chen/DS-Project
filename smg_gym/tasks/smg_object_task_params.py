@@ -28,6 +28,7 @@ class SMGObjectTaskDimensions(enum.Enum):
     FingertipPosDim = PosDim * NumFingers
     FingertipOrnDim = OrnDim * NumFingers
     FingerContactForceDim = ForceDim * NumFingers
+    FingerContactTorqueDim = TorqueDim * NumFingers
 
     # for three fingers
     ActionDim = 9
@@ -45,6 +46,19 @@ class SMGObjectTaskDimensions(enum.Enum):
 
 dims = SMGObjectTaskDimensions
 
+object_properties = {
+    "sphere": {
+        "radius": 0.035,
+        "radius_llim": 0.03,
+        "radius_ulim": 0.04,
+    },
+    "box": {
+        "size": [0.075, 0.075, 0.075],
+        "size_llims": [0.06, 0.06, 0.06],
+        "size_ulims": [0.08, 0.08, 0.08],
+    },
+}
+
 # maximum joint torque (in N-m) applicable on each actuator
 max_torque_Nm = 0.4
 
@@ -56,9 +70,9 @@ max_velocity_radps = np.deg2rad(45.0)
 
 robot_dof_gains = {
     # The kp and kd gains of the PD control of the fingers.
-    # Note: This depends on simulation step size and is set for a rate of 250 Hz.
     "stiffness": [0.6, 0.6, 0.2] * dims.NumFingers.value,
     "damping": [0.03, 0.01, 0.005] * dims.NumFingers.value,
+    "friction": [0.0, 0.0, 0.0] * dims.NumFingers.value,
 }
 
 # actuated joints on the hand
@@ -74,9 +88,12 @@ robot_limits = {
         # matches those on the real robot
         low=np.array([-0.785, -1.396, -1.047] * dims.NumFingers.value, dtype=np.float32),
         high=np.array([0.785, 1.047, 1.396] * dims.NumFingers.value, dtype=np.float32),
-        default=np.deg2rad([0.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
-        rand_lolim=np.deg2rad([-20.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
-        rand_uplim=np.deg2rad([20.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
+        # default=np.deg2rad([0.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
+        # rand_lolim=np.deg2rad([-20.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
+        # rand_uplim=np.deg2rad([20.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
+        default=np.array([-0.45, 0.35, -0.55, 0.0, 0.35, -0.55, 0.45, 0.35, -0.55], dtype=np.float32),
+        rand_lolim=np.array([-0.15, 0.35, -0.55, -0.3, 0.35, -0.55, 0.15, 0.35, -0.55], dtype=np.float32),
+        rand_uplim=np.array([-0.75, 0.35, -0.55, 0.3, 0.35, -0.55, 0.75, 0.35, -0.55], dtype=np.float32),
     ),
     "joint_velocity": SimpleNamespace(
         low=np.full(dims.JointVelocityDim.value, -max_velocity_radps, dtype=np.float32),

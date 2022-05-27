@@ -15,12 +15,22 @@ env:
 
   # env settings
   obj_name: 'sphere'
-  # obj_name: 'cube'
+  # obj_name: 'box'
+  # obj_name: 'rand'
+
+  clip_observations: 5.0
+  clip_actions: 1.0
+
+  enable_dof_force_sensors: False
+  contact_sensor_modality: 'ft_sensor'
+  # contact_sensor_modality: 'rich_cpu'
 
   # action settings
-  useRelativeControl: True
-  dofSpeedScale: 10.0
-  actionsMovingAverage: 1.0
+  normalize_action: False
+  dof_speed_scale: 0.02
+  use_sim_pd_control: False
+  command_mode: 'position'
+  # command_mode: 'torque'
   control_frequency_inv: 2
 
   # reward/termination
@@ -48,7 +58,8 @@ env:
 rand_params:
   randomize: True
   rand_hand_joints: True
-  rand_obj_init_orn: True
+  rand_obj_init_orn: False
+  rand_obj_scale: False
 
 sim:
   dt: 0.02 # 1/60

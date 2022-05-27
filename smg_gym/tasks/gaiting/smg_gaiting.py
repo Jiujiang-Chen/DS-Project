@@ -33,11 +33,14 @@ class SMGGaiting(BaseGaiting):
         Obs:
             joint_pos: 9
             joint_vel: 9
+            joint_dof_force: 9
             fingertip_pos: 9
             fingertip_orn: 12
             last_action: 9
             bool_tip_contacts: 3
             tip_contact_forces: 9
+            ft_sensor_contact_forces: 9
+            ft_sensor_contact_torques: 9
             tip_contact_positions: 9
             tip_contact_normals: 9
             tip_contact_force_magnitudes: 3
@@ -55,10 +58,10 @@ class SMGGaiting(BaseGaiting):
         max_total = 147
         """
 
-        cfg["env"]["numObservations"] = 147
+        cfg["env"]["numObservations"] = 174
 
         if cfg["asymmetric_obs"]:
-            cfg["env"]["numStates"] = 147
+            cfg["env"]["numStates"] = 174
 
         cfg["env"]["numActions"] = 9
 

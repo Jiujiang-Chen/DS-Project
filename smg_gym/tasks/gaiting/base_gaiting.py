@@ -36,10 +36,7 @@ class BaseGaiting(BaseShadowModularGrasper):
         if self.reward_type not in ["hybrid", "keypoint"]:
             raise ValueError('Incorrect reward mode specified.')
 
-        # randomisation params
-        self.randomize = cfg["rand_params"]["randomize"]
-        self.rand_hand_joints = cfg["rand_params"]["rand_hand_joints"]
-        self.rand_obj_init_orn = cfg["rand_params"]["rand_obj_init_orn"]
+        # task specific randomisation params
         self.rand_pivot_pos = cfg["rand_params"]["rand_pivot_pos"]
         self.rand_pivot_axel = cfg["rand_params"]["rand_pivot_axel"]
 
@@ -51,8 +48,6 @@ class BaseGaiting(BaseShadowModularGrasper):
         )
 
         self._setup_pivot_point()
-
-        self.domain_randomizer.get_actor_params_info(self.envs[0])
 
     def _setup_pivot_point(self):
 

@@ -15,7 +15,7 @@ from hydra.utils import to_absolute_path
 
 from isaacgymenvs.utils.reformat import omegaconf_to_dict, print_dict
 from isaacgymenvs.utils.rlgames_utils import RLGPUEnv, RLGPUAlgoObserver
-from isaacgymenvs.utils.utils import set_np_formatting, set_seed
+from isaacgymenvs.utils.utils import set_seed
 
 from rl_games.common import env_configurations, vecenv
 from rl_games.torch_runner import Runner
@@ -40,9 +40,6 @@ def launch_trajectory_checker(cfg: DictConfig):
 
     cfg_dict = omegaconf_to_dict(cfg)
     print_dict(cfg_dict)
-
-    # set numpy formatting for printing only
-    # set_np_formatting()
 
     # sets seed. if seed is -1 will pick a random one
     cfg.seed = set_seed(cfg.seed, torch_deterministic=cfg.torch_deterministic)
@@ -96,7 +93,7 @@ def simple_run_agent(player):
     max_steps = len(ref_df)
 
     df = pd.DataFrame(
-        columns=['actions', 'joint_pos', 'joint_vel', 'fingertip_pos', 'fingertip_orn']
+        columns=['actions', 'joint_pos', 'joint_vel', 'joint_eff', 'fingertip_pos', 'fingertip_orn']
     )
     row_counter = 0
 
@@ -112,7 +109,8 @@ def simple_run_agent(player):
             list(obses[0, 0:9].cpu().numpy()),
             list(obses[0, 9:18].cpu().numpy()),
             list(obses[0, 18:27].cpu().numpy()),
-            list(obses[0, 27:39].cpu().numpy()),
+            list(obses[0, 27:36].cpu().numpy()),
+            list(obses[0, 36:48].cpu().numpy()),
         ]
         row_counter += 1
 
