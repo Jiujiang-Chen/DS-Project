@@ -132,11 +132,11 @@ def compute_keypoint_reorient_reward(
     # add penalty for large actions
     action_penalty = -torch.sum(actions**2, dim=-1) * action_penalty_scale
 
-    # add reward for maintaining tips in contact
-    contact_rew = n_tip_contacts * contact_reward_scale
-
     # Total reward is: position distance + orientation alignment + action regularization + success bonus + fall penalty
-    total_reward = kp_dist_rew + action_penalty + contact_rew
+    total_reward = kp_dist_rew + action_penalty
+
+    # add reward for maintaining tips in contact
+    total_reward = torch.where(n_tip_contacts < 2, total_reward, total_reward + contact_reward_scale)
 
     # zero reward when less than 2 tips in contact
     if require_contact:

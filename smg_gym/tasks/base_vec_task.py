@@ -348,11 +348,8 @@ class VecTask(Env):
         # clip actions to limits
         action = torch.clamp(action, -self.clip_actions, self.clip_actions)
 
-        # copy input action command into buffer
-        self.action_buf = action.clone().to(self.device)
-
         # apply action
-        self.pre_physics_step()
+        self.pre_physics_step(action)
 
         # step physics and render each frame
         for _ in range(self.control_freq_inv):

@@ -26,8 +26,8 @@ env:
   # contact_sensor_modality: 'rich_cpu'
 
   # action settings
-  normalize_action: False
-  dof_speed_scale: 0.02
+
+  actions_scale: 0.01
   use_sim_pd_control: False
   command_mode: 'position'
   # command_mode: 'torque'

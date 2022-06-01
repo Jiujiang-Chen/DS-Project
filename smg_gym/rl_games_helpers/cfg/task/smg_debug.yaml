@@ -6,6 +6,7 @@ physics_engine: ${..physics_engine}
 # if given, will override the device setting in gym.
 env:
   num_envs: 1
+  # num_envs: 2
   # num_envs: 4096
   # num_envs: 8192
   # num_envs: 16384
@@ -28,12 +29,12 @@ env:
   # contact_sensor_modality: 'rich_cpu'
 
   # action settings
-  normalize_action: False
-  dof_speed_scale: 0.02
+  actions_scale: 0.01
+  control_frequency_inv: 3  # 20hz
   use_sim_pd_control: True
   command_mode: 'position'
+  # command_mode: 'velocity'
   # command_mode: 'torque'
-  control_frequency_inv: 2
 
   # shared reward/termination
   episode_length: 1000
@@ -63,14 +64,14 @@ rand_params:
   rand_obj_init_orn: False
   rand_obj_scale: True
 
-normalize_obs: False
+normalize_obs: True
 asymmetric_obs: False
 enabled_obs:
 
     # proprio
     joint_pos: True
     joint_vel: True
-    joint_dof_force: True
+    joint_eff: True
     fingertip_pos: True
     fingertip_orn: True
     last_action: True
@@ -107,7 +108,7 @@ enabled_states:
     # proprio
     joint_pos: True
     joint_vel: True
-    joint_dof_force: True
+    joint_eff: True
     fingertip_pos: True
     fingertip_orn: True
     last_action: True
@@ -141,8 +142,8 @@ enabled_states:
     pivot_axel_pos: True
 
 sim:
-  dt: 0.02
-  substeps: 4
+  dt: 0.016667 # 1/60
+  substeps: 2
   up_axis: "z"
   use_gpu_pipeline: ${eq:${...pipeline},"gpu"}
   gravity: [0.0, 0.0, -9.81]
@@ -150,7 +151,7 @@ sim:
     num_threads: ${....num_threads}
     solver_type: ${....solver_type}
     use_gpu: ${contains:"cuda",${....sim_device}}
-    num_position_iterations: 8
+    num_position_iterations: 4
     num_velocity_iterations: 0
     max_gpu_contact_pairs: 8388608
     contact_offset: 0.002

@@ -15,16 +15,17 @@ class DomainRandomizer:
     Methods for applying domain randomization.
     """
 
-    def __init__(self, sim, gym, envs, dr_params, num_envs):
+    def __init__(self, sim, gym, envs, apply_dr, dr_params, num_envs):
 
         self.sim = sim
         self.gym = gym
         self.envs = envs
+        self.apply_dr = apply_dr
         self.dr_params = dr_params
         self.num_envs = num_envs
 
         print('')
-        print('Domain Randomization:')
+        print(f'Domain Randomization: {self.apply_dr}')
         for key in self.dr_params:
             print(key, self.dr_params[key])
         print('')

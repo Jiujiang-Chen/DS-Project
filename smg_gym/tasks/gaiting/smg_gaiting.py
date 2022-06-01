@@ -33,7 +33,7 @@ class SMGGaiting(BaseGaiting):
         Obs:
             joint_pos: 9
             joint_vel: 9
-            joint_dof_force: 9
+            joint_eff: 9
             fingertip_pos: 9
             fingertip_orn: 12
             last_action: 9

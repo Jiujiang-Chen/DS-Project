@@ -1,5 +1,6 @@
 """
 python check_joint_trajectories.py task=smg_debug headless=false
+python check_joint_trajectories.py task=smg_debug test=True headless=false checkpoint=runs/smg_gaiting/nn/smg_gaiting.pth
 """
 
 # need to import isaacgym before torch
@@ -18,7 +19,7 @@ from isaacgymenvs.utils.rlgames_utils import RLGPUEnv, RLGPUAlgoObserver
 from isaacgymenvs.utils.utils import set_seed
 
 from rl_games.common import env_configurations, vecenv
-from rl_games.torch_runner import Runner
+from rl_games.torch_runner import Runner, _restore, _override_sigma
 
 from smg_gym.utils.rlgames_utils import get_rlgames_env_creator
 
@@ -75,35 +76,43 @@ def launch_trajectory_checker(cfg: DictConfig):
     # create an agent and restore parameters
     player = runner.create_player()
 
-    simple_run_agent(player)
+    if not cfg.checkpoint:
+        simple_run_agent(player, use_csv_actions=True)
+    else:
+        runner_args = {
+            'train': not cfg.test,
+            'play': cfg.test,
+            'checkpoint': cfg.checkpoint,
+            'sigma': cfg.sigma
+        }
+        _restore(player, runner_args)
+        _override_sigma(player, runner_args)
+
+        simple_run_agent(player, use_csv_actions=False)
 
 
-def simple_run_agent(player):
+def simple_run_agent(player, use_csv_actions=True):
 
-    # compare_to = 'real'
-    compare_to = 'gazebo'
+    data_dir = '/home/alex/Documents/smg_real/smg_real/proprio_data'
 
-    data_dir = '/home/alex/Documents/smg_real/smg_real/utils/proprio_data'
-    ref_df_name = os.path.join(
-        data_dir,
-        f'{compare_to}_proprio.csv'
-    )
-    ref_df = pd.read_csv(ref_df_name)
-    ref_df['actions'] = ref_df['actions'].apply(lambda x: literal_eval(x))
-    max_steps = len(ref_df)
+    if use_csv_actions:
+        ref_df_name = os.path.join(
+            data_dir,
+            'rand_actions',
+            'gazebo_proprio.csv'
+        )
+        ref_df = pd.read_csv(ref_df_name)
+        ref_df['actions'] = ref_df['actions'].apply(lambda x: literal_eval(x))
+        max_steps = len(ref_df) - 1
+    else:
+        max_steps = 200
 
     df = pd.DataFrame(
-        columns=['actions', 'joint_pos', 'joint_vel', 'joint_eff', 'fingertip_pos', 'fingertip_orn']
+        columns=['actions', 'joint_pos', 'joint_vel', 'joint_eff', 'fingertip_pos', 'fingertip_orn', 'latest_action']
     )
     row_counter = 0
 
-    player.env_reset(player.env)
-
-    for n in range(max_steps):
-        actions = np.array(ref_df.loc[row_counter]['actions'])[np.newaxis, ...]
-
-        obses, r, done, info = player.env_step(player.env, actions)
-
+    def add_to_csv(obses, actions, row_counter):
         df.loc[row_counter] = [
             list(actions[0, :]),
             list(obses[0, 0:9].cpu().numpy()),
@@ -111,11 +120,35 @@ def simple_run_agent(player):
             list(obses[0, 18:27].cpu().numpy()),
             list(obses[0, 27:36].cpu().numpy()),
             list(obses[0, 36:48].cpu().numpy()),
+            list(obses[0, 48:57].cpu().numpy()),
         ]
+
+    obses = player.env_reset(player.env)
+
+    if use_csv_actions:
+        actions = np.array(ref_df.loc[row_counter]['actions'])[np.newaxis, ...]
+    else:
+        actions = player.get_action(obses[np.newaxis, ...], is_determenistic=True).cpu().numpy()[np.newaxis, ...]
+
+    add_to_csv(obses, actions, row_counter)
+    row_counter += 1
+
+    for n in range(max_steps):
+
+        if use_csv_actions:
+            actions = np.array(ref_df.loc[row_counter-1]['actions'])[np.newaxis, ...]
+        else:
+            actions = player.get_action(obses[np.newaxis, ...], is_determenistic=True).cpu().numpy()[np.newaxis, ...]
+
+        obses, r, done, info = player.env_step(player.env, actions)
+
+        add_to_csv(obses, actions, row_counter)
         row_counter += 1
 
+    # save data
     csv_filename = os.path.join(
         data_dir,
+        'rand_actions' if use_csv_actions else 'trained_agent_actions',
         'isaacgym_proprio.csv'
     )
     print(f'Saving Data to {csv_filename}')

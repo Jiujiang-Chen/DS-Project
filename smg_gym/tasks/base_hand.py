@@ -15,7 +15,7 @@ from isaacgym import gymutil
 from smg_gym.tasks.base_vec_task import VecTask
 from smg_gym.utils.torch_jit_utils import randomize_rotation
 from smg_gym.utils.torch_jit_utils import saturate
-from smg_gym.utils.torch_jit_utils import unscale_transform
+from smg_gym.utils.torch_jit_utils import scale_transform
 
 from smg_gym.utils.draw_utils import get_sphere_geom
 from smg_gym.assets import add_assets_path
@@ -26,9 +26,8 @@ from smg_gym.tasks.smg_object_task_params import robot_limits
 from smg_gym.tasks.smg_object_task_params import object_limits
 from smg_gym.tasks.smg_object_task_params import target_limits
 from smg_gym.tasks.smg_object_task_params import robot_dof_gains
+from smg_gym.tasks.smg_object_task_params import robot_dof_properties
 from smg_gym.tasks.smg_object_task_params import control_joint_names
-from smg_gym.tasks.smg_object_task_params import max_torque_Nm
-from smg_gym.tasks.smg_object_task_params import max_velocity_radps
 
 from smg_gym.tasks.domain_randomisation import DomainRandomizer
 
@@ -53,12 +52,11 @@ class BaseShadowModularGrasper(VecTask):
     # PD gains for the robot (mapped later: str -> torch.tensor)
     _robot_dof_gains = robot_dof_gains
 
+    # limits and friction
+    _robot_dof_properties = robot_dof_properties
+
     # actuated joints of the hand
     _control_joint_names = control_joint_names
-
-    # torque and velocity limits
-    _max_torque_Nm = max_torque_Nm
-    _max_velocity_radps = max_velocity_radps
 
     # History of state: Number of timesteps to save history for.
     # The length of list is the history of the state: 0: t, 1: t-1, 2: t-2, ... step.
@@ -66,6 +64,7 @@ class BaseShadowModularGrasper(VecTask):
 
     # Hand joint states list([num. of instances, num. of dofs])
     _hand_joint_pos_history: Deque[torch.Tensor] = deque(maxlen=_state_history_len)
+    _hand_joint_vel_history: Deque[torch.Tensor] = deque(maxlen=_state_history_len)
 
     # Fingertip tcp state list([num. of instances, num. of fingers, 13]) where 13: (pos, quat, linvel, angvel)
     _fingertip_tcp_state_history: Deque[torch.Tensor] = deque(maxlen=_state_history_len)
@@ -94,7 +93,7 @@ class BaseShadowModularGrasper(VecTask):
 
         # action params
         self.use_sim_pd_control = cfg["env"]["use_sim_pd_control"]
-        self.dof_speed_scale = cfg["env"]["dof_speed_scale"]
+        self.actions_scale = cfg["env"]["actions_scale"]
 
         # shared task randomisation params
         self.randomize = cfg["rand_params"]["randomize"]
@@ -113,8 +112,8 @@ class BaseShadowModularGrasper(VecTask):
         # initialize the buffers
         self._setup_tensors()
 
-        # set the mdp spaces
-        self._setup_mdp_spaces()
+        # spaces for normalising observations
+        self._setup_observation_normalisation()
 
         # inialize buffers that store history of observations
         self.initialize_state_history_buffers()
@@ -217,39 +216,113 @@ class BaseShadowModularGrasper(VecTask):
         self.total_successes = 0
         self.total_resets = 0
 
-    def _setup_mdp_spaces(self):
+    def _setup_observation_normalisation(self):
         """
         Configures the observations, state and action spaces.
         """
 
-        # Action scale for the MDP
+        # change obs action scale dependent on mode
+        if self.cfg["env"]["command_mode"] == 'position':
+            obs_action_scale = self._robot_limits["latest_action_pos"]
+        elif self.cfg["env"]["command_mode"] == 'velocity':
+            obs_action_scale = self._robot_limits["latest_action_vel"]
+        elif self.cfg["env"]["command_mode"] == 'effort':
+            obs_action_scale = self._robot_limits["latest_action_eff"]
+
         # Note: This is order sensitive.
-        if self.cfg["env"]["command_mode"] == "position":
-            # action space is joint positions
-            self._action_scale.low = self._robot_limits["joint_position"].low
-            self._action_scale.high = self._robot_limits["joint_position"].high
+        self._observations_scale.low = torch.cat([
 
-        elif self.cfg["env"]["command_mode"] == "torque":
-            # action space is joint torques
-            self._action_scale.low = self._robot_limits["joint_torque"].low
-            self._action_scale.high = self._robot_limits["joint_torque"].high
+            # proprio
+            self._robot_limits["joint_position"].low,
+            self._robot_limits["joint_velocity"].low,
+            self._robot_limits["joint_effort"].low,
+            self._robot_limits["fingertip_position"].low,
+            self._robot_limits["fingertip_orientation"].low,
 
-        else:
-            msg = f"Invalid command mode. Input: {self.cfg['env']['command_mode']} not in ['torque', 'position']."
-            raise ValueError(msg)
+            # action
+            obs_action_scale.low,
 
-        # actions
-        if self._action_scale.low.shape[0] != self.num_actions or self._action_scale.high.shape[0] != self.num_actions:
-            msg = f"Actions scaling dimensions mismatch. " \
-                  f"\tLow: {self._action_scale.low.shape[0]}, " \
-                  f"\tHigh: {self._action_scale.high.shape[0]}, " \
-                  f"\tExpected: {self.num_actions}."
+            # tactile
+            self._robot_limits["bool_tip_contacts"].low,
+            self._robot_limits["net_tip_contact_forces"].low,
+            self._robot_limits["ft_sensor_contact_forces"].low,
+            self._robot_limits["ft_sensor_contact_torques"].low,
+            self._robot_limits["tip_contact_positions"].low,
+            self._robot_limits["tip_contact_normals"].low,
+            self._robot_limits["tip_contact_force_mags"].low,
 
+            # object
+            self._object_limits["position"].low,
+            self._object_limits["orientation"].low,
+            self._object_limits["keypoint_position"].low,
+            self._object_limits["linear_velocity"].low,
+            self._object_limits["angular_velocity"].low,
+
+            # target
+            self._target_limits["position"].low,
+            self._target_limits["orientation"].low,
+            self._target_limits["keypoint_position"].low,
+            self._target_limits["active_quat"].low,
+
+            # gaiting conditions
+            self._target_limits["pivot_axel_vector"].low,
+            self._target_limits["pivot_axel_position"].low,
+        ])
+
+        self._observations_scale.high = torch.cat([
+
+            # proprio
+            self._robot_limits["joint_position"].high,
+            self._robot_limits["joint_velocity"].high,
+            self._robot_limits["joint_effort"].high,
+            self._robot_limits["fingertip_position"].high,
+            self._robot_limits["fingertip_orientation"].high,
+
+            # action
+            obs_action_scale.high,
+
+            # tactile
+            self._robot_limits["bool_tip_contacts"].high,
+            self._robot_limits["net_tip_contact_forces"].high,
+            self._robot_limits["ft_sensor_contact_forces"].high,
+            self._robot_limits["ft_sensor_contact_torques"].high,
+            self._robot_limits["tip_contact_positions"].high,
+            self._robot_limits["tip_contact_normals"].high,
+            self._robot_limits["tip_contact_force_mags"].high,
+
+            # object
+            self._object_limits["position"].high,
+            self._object_limits["orientation"].high,
+            self._object_limits["keypoint_position"].high,
+            self._object_limits["linear_velocity"].high,
+            self._object_limits["angular_velocity"].high,
+
+            # target
+            self._target_limits["position"].high,
+            self._target_limits["orientation"].high,
+            self._target_limits["keypoint_position"].high,
+            self._target_limits["active_quat"].high,
+
+            # gaiting conditions
+            self._target_limits["pivot_axel_vector"].high,
+            self._target_limits["pivot_axel_position"].high,
+        ])
+
+        # check that dimensions match
+        # observations
+        if self._observations_scale.low.shape[0] != self.num_obs or self._observations_scale.high.shape[0] != self.num_obs:
+            msg = f"Observation scaling dimensions mismatch. " \
+                  f"\tLow: {self._observations_scale.low.shape[0]}, " \
+                  f"\tHigh: {self._observations_scale.high.shape[0]}, " \
+                  f"\tExpected: {self.num_obs}."
             raise AssertionError(msg)
 
     def initialize_state_history_buffers(self):
         for _ in range(self._state_history_len):
             self._hand_joint_pos_history.append(
+                torch.zeros(size=(self.num_envs, self.n_hand_dofs), dtype=torch.float32, device=self.device)
+            )
+            self._hand_joint_vel_history.append(
                 torch.zeros(size=(self.num_envs, self.n_hand_dofs), dtype=torch.float32, device=self.device)
             )
             self._object_base_pos_history.append(
@@ -272,6 +345,7 @@ class BaseShadowModularGrasper(VecTask):
             self.sim,
             self.gym,
             self.envs,
+            self.apply_dr,
             self.dr_params,
             self.num_envs
         )
@@ -298,6 +372,7 @@ class BaseShadowModularGrasper(VecTask):
 
         asset_root = add_assets_path("robot_assets/smg_minitip_v2")
         asset_file = "smg_tactip.urdf"
+        # asset_file = "smg_tactip_with_tip_targets.urdf"
 
         asset_options = gymapi.AssetOptions()
         asset_options.disable_gravity = True
@@ -313,11 +388,6 @@ class BaseShadowModularGrasper(VecTask):
         asset_options.armature = 0.00001
         if self.physics_engine == gymapi.SIM_PHYSX:
             asset_options.use_physx_armature = True
-
-        if self.use_sim_pd_control:
-            asset_options.default_dof_drive_mode = int(gymapi.DOF_MODE_POS)
-        else:
-            asset_options.default_dof_drive_mode = int(gymapi.DOF_MODE_EFFORT)
 
         self.hand_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
 
@@ -354,6 +424,8 @@ class BaseShadowModularGrasper(VecTask):
 
         # target tensor for updating
         self.target_dof_pos = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
+        self.target_dof_vel = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
+        self.target_dof_eff = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
 
     def _choose_env_object(self):
 
@@ -576,9 +648,16 @@ class BaseShadowModularGrasper(VecTask):
 
             # Use Isaacgym PD control
             if self.use_sim_pd_control:
-                hand_dof_props['driveMode'][dof_index] = gymapi.DOF_MODE_POS
-                hand_dof_props['stiffness'][dof_index] = float(self._robot_dof_gains["stiffness"][dof_index])
-                hand_dof_props['damping'][dof_index] = float(self._robot_dof_gains["damping"][dof_index])
+
+                if self.cfg["env"]["command_mode"] == 'position':
+                    hand_dof_props['driveMode'][dof_index] = gymapi.DOF_MODE_POS
+                elif self.cfg["env"]["command_mode"] == 'velocity':
+                    hand_dof_props['driveMode'][dof_index] = gymapi.DOF_MODE_VEL
+                elif self.cfg["env"]["command_mode"] == 'effort':
+                    hand_dof_props['driveMode'][dof_index] = gymapi.DOF_MODE_EFFORT
+
+                hand_dof_props['stiffness'][dof_index] = float(self._robot_dof_gains["p_gains"][dof_index])
+                hand_dof_props['damping'][dof_index] = float(self._robot_dof_gains["d_gains"][dof_index])
 
             # Manually compute and apply torque even in position mode
             # (as done in Trifinger paper).
@@ -587,11 +666,11 @@ class BaseShadowModularGrasper(VecTask):
                 hand_dof_props['stiffness'][dof_index] = 0.0
                 hand_dof_props['damping'][dof_index] = 0.0
 
-            hand_dof_props['effort'][dof_index] = self._max_torque_Nm
-            hand_dof_props['velocity'][dof_index] = self._max_velocity_radps
+            hand_dof_props['effort'][dof_index] = self._robot_dof_properties["max_torque_Nm"]
+            hand_dof_props['velocity'][dof_index] = self._robot_dof_properties["max_velocity_radps"]
+            hand_dof_props['friction'][dof_index] = self._robot_dof_properties["friction"][dof_index]
             hand_dof_props['lower'][dof_index] = float(self._robot_limits["joint_position"].low[dof_index])
             hand_dof_props['upper'][dof_index] = float(self._robot_limits["joint_position"].high[dof_index])
-            hand_dof_props['friction'][dof_index] = float(self._robot_dof_gains["friction"][dof_index])
 
         self.gym.set_actor_dof_properties(env_ptr, handle, hand_dof_props)
 
@@ -778,14 +857,14 @@ class BaseShadowModularGrasper(VecTask):
                     tip_contacts['lambda'].mean() if len(tip_contacts['lambda']) > 0 else 0.0
                 ], device=self.device)
 
-    def pre_physics_step(self):
+    def pre_physics_step(self, actions):
         """Apply the actions to the environment (eg by setting torques, position targets).
 
         Args:
             actions: the actions to apply
         """
         self.apply_resets()
-        self.apply_actions()
+        self.apply_actions(actions)
 
     def post_physics_step(self):
         """Compute reward and observations, reset any environments that require it."""
@@ -797,6 +876,7 @@ class BaseShadowModularGrasper(VecTask):
         self.compute_observations()
         self.fill_observation_buffer()
         self.fill_states_buffer()
+        self.norm_obs_state_buffer()
         self.compute_reward_and_termination()
 
         if self.viewer and self.debug_viz:
@@ -842,7 +922,7 @@ class BaseShadowModularGrasper(VecTask):
         # joint dof force
         start_offset = end_offset
         end_offset = start_offset + self._dims.JointTorqueDim.value
-        if buf_cfg["joint_dof_force"]:
+        if buf_cfg["joint_eff"]:
             buf[:, start_offset:end_offset] = self.dof_force_tensor
 
         # fingertip positions
@@ -970,6 +1050,25 @@ class BaseShadowModularGrasper(VecTask):
 
         return start_offset, end_offset
 
+    def norm_obs_state_buffer(self):
+        """
+        Normalise the observation and state buffer
+        """
+        if self.cfg["normalize_obs"]:
+            # for normal obs
+            self.obs_buf = scale_transform(
+                self.obs_buf,
+                lower=self._observations_scale.low,
+                upper=self._observations_scale.high
+            )
+            # for asymmetric obs
+            if self.cfg["asymmetric_obs"]:
+                self.states_buf = scale_transform(
+                    self.states_buf,
+                    lower=self._observations_scale.low,
+                    upper=self._observations_scale.high
+                )
+
     def compute_reward_and_termination(self):
         """
         Calculate the reward.
@@ -984,7 +1083,6 @@ class BaseShadowModularGrasper(VecTask):
 
         # add randomisation to the joint poses
         if self.randomize and self.rand_hand_joints:
-
             # sample uniform random from (-1, 1)
             rand_stddev = torch_rand_float(-1.0, 1.0, (num_envs_to_reset, self.n_hand_dofs), device=self.device)
 
@@ -993,31 +1091,52 @@ class BaseShadowModularGrasper(VecTask):
             delta_min = self._robot_limits["joint_position"].rand_lolim - self._robot_limits["joint_position"].default
             target_dof_pos = self._robot_limits["joint_position"].default + \
                 delta_min + (delta_max - delta_min) * rand_stddev
-            target_dof_vel = self._robot_limits["joint_velocity"].default
-
         else:
             target_dof_pos = self._robot_limits["joint_position"].default
-            target_dof_vel = self._robot_limits["joint_velocity"].default
 
-        self.dof_pos[env_ids_for_reset, :] = target_dof_pos
-        self.dof_vel[env_ids_for_reset, :] = target_dof_vel
+        # get default velocity and effort
+        target_dof_vel = self._robot_limits["joint_velocity"].default
+        target_dof_eff = self._robot_limits["joint_effort"].default
+
         self.target_dof_pos[env_ids_for_reset, :self.n_hand_dofs] = target_dof_pos
+        self.target_dof_vel[env_ids_for_reset, :self.n_hand_dofs] = target_dof_vel
+        self.target_dof_eff[env_ids_for_reset, :self.n_hand_dofs] = target_dof_eff
 
         # reset robot fingertips state history
         for idx in range(1, self._state_history_len):
             self._hand_joint_pos_history[idx][env_ids_for_reset] = 0.0
+            self._hand_joint_vel_history[idx][env_ids_for_reset] = 0.0
 
         # fill first sample from buffer to allow for deltas on next step
         self._hand_joint_pos_history[0][env_ids_for_reset, :] = target_dof_pos
+        self._hand_joint_vel_history[0][env_ids_for_reset, :] = target_dof_vel
 
         # set DOF states to those reset
         hand_ids_int32 = self.hand_indices[env_ids_for_reset].to(torch.int32)
+
+        # reset the targets for the sim pd_controller
         self.gym.set_dof_position_target_tensor_indexed(
             self.sim,
             gymtorch.unwrap_tensor(self.target_dof_pos),
             gymtorch.unwrap_tensor(hand_ids_int32),
             num_envs_to_reset
         )
+        self.gym.set_dof_velocity_target_tensor_indexed(
+            self.sim,
+            gymtorch.unwrap_tensor(self.target_dof_vel),
+            gymtorch.unwrap_tensor(hand_ids_int32),
+            num_envs_to_reset
+        )
+        self.gym.set_dof_actuation_force_tensor_indexed(
+            self.sim,
+            gymtorch.unwrap_tensor(self.target_dof_eff),
+            gymtorch.unwrap_tensor(hand_ids_int32),
+            num_envs_to_reset
+        )
+
+        # reset the state of the dofs
+        self.dof_pos[env_ids_for_reset, :] = target_dof_pos
+        self.dof_vel[env_ids_for_reset, :] = target_dof_vel
         self.gym.set_dof_state_tensor_indexed(
             self.sim,
             gymtorch.unwrap_tensor(self.dof_state),
@@ -1119,84 +1238,174 @@ class BaseShadowModularGrasper(VecTask):
 
         # reset buffers
         self.progress_buf[env_ids_for_reset] = 0
+        self.action_buf[env_ids_for_reset] = 0
         self.reset_buf[env_ids_for_reset] = 0
         self.successes[env_ids_for_reset] = 0
 
-    def apply_actions(self):
+    def apply_actions(self, actions):
         """
         Setting of input actions into simulator before performing the physics simulation step.
         Actions are in action_buf variable.
         """
         # zero/positive/negative actions for debugging
-        # self.action_buf = torch.zeros_like(self.action_buf)
-        # self.action_buf = torch.ones_like(self.action_buf)
-        # self.action_buf = torch.ones_like(self.action_buf) * -1
-
-        # if normalized_action is true, then denormalize them.
-        if self.cfg["env"]["normalize_action"]:
-            actions_transformed = unscale_transform(
-                self.action_buf,
-                lower=self._action_scale.low,
-                upper=self._action_scale.high
-            )
-        else:
-            actions_transformed = self.action_buf
+        # actions = torch.zeros_like(self.action_buf)
+        # actions = torch.ones_like(self.action_buf)
+        # actions = torch.ones_like(self.action_buf) * -1
 
         if self.use_sim_pd_control:
-            self.apply_actions_sim_pd(actions_transformed)
+            self.apply_actions_sim_pd(actions)
         else:
-            self.apply_actions_custom_pd(actions_transformed)
+            self.apply_actions_custom_pd(actions)
 
     def apply_actions_sim_pd(self, actions):
         """
         Use IsaacGym PD controller for applying actions.
         """
-        new_targets = self.target_dof_pos + self.dof_speed_scale * actions
-        self.target_dof_pos = saturate(
-            new_targets,
-            lower=self._robot_limits['joint_position'].low,
-            upper=self._robot_limits['joint_position'].high
-        )
-        self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.target_dof_pos))
+
+        if self.cfg["env"]["command_mode"] == 'position':
+
+            # increment actions in buffer with new actions
+            self.action_buf += actions.clone().to(self.device) * self.actions_scale
+
+            # limit to max change per step
+            self.action_buf = torch.clamp(
+                self.action_buf,
+                -self._robot_dof_properties["max_position_delta_rad"],
+                self._robot_dof_properties["max_position_delta_rad"]
+            )
+
+            # set new target position
+            self.target_dof_pos += self.action_buf
+
+            # limit new target position within joint limits
+            self.target_dof_pos = saturate(
+                self.target_dof_pos,
+                lower=self._robot_limits['joint_position'].low,
+                upper=self._robot_limits['joint_position'].high
+            )
+
+            # send target position to sim
+            self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.target_dof_pos))
+
+        elif self.cfg["env"]["command_mode"] == 'velocity':
+            # increment actions in buffer with new actions
+            self.action_buf += actions.clone().to(self.device) * self.actions_scale
+
+            # limit to max change per step
+            self.action_buf = torch.clamp(
+                self.action_buf,
+                -self._robot_dof_properties["max_velocity_radps"],
+                self._robot_dof_properties["max_velocity_radps"]
+            )
+
+            # set new target velocity
+            self.target_dof_vel += self.action_buf
+
+            # limit new target velocity within limits
+            self.target_dof_vel = saturate(
+                self.target_dof_vel,
+                lower=self._robot_limits['joint_velocity'].low,
+                upper=self._robot_limits['joint_velocity'].high
+            )
+
+            # send target velocity to sim
+            self.gym.set_dof_velocity_target_tensor(self.sim, gymtorch.unwrap_tensor(self.target_dof_vel))
+
+        # compute command on the basis of mode selected
+        elif self.cfg["env"]["command_mode"] == 'torque':
+
+            # set new target effort
+            self.target_dof_eff = actions.clone().to(self.device) * self.actions_scale
+
+            # limit new target velocity within joint limits
+            self.target_dof_eff = saturate(
+                self.target_dof_eff,
+                lower=self._robot_limits["joint_effort"].low,
+                upper=self._robot_limits["joint_effort"].high
+            )
+
+            # set computed torques to simulator buffer.
+            self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.target_dof_eff))
+
+        else:
+            msg = f"Invalid command mode. Input: {self.cfg['env']['command_mode']} not in ['position', 'velocity', 'torque']."
+            raise ValueError(msg)
 
     def apply_actions_custom_pd(self, actions):
         """
         Use custom PD controller for applying actions.
         """
-        # compute command on the basis of mode selected
-        if self.cfg["env"]["command_mode"] == 'torque':
-            # command is the desired joint torque
-            computed_torque = actions
+        if self.cfg["env"]["command_mode"] == 'position':
 
-        elif self.cfg["env"]["command_mode"] == 'position':
+            # increment actions in buffer with new actions
+            self.action_buf += actions.clone().to(self.device) * self.actions_scale
 
-            new_targets = self.target_dof_pos + self.dof_speed_scale * actions
+            # limit to max change per step
+            self.action_buf = torch.clamp(
+                self.action_buf,
+                -self._robot_dof_properties["max_position_delta_rad"],
+                self._robot_dof_properties["max_position_delta_rad"]
+            )
+
+            # set new target position
+            self.target_dof_pos += self.action_buf
+
+            # limit new target position within joint limits
             self.target_dof_pos = saturate(
-                new_targets,
+                self.target_dof_pos,
                 lower=self._robot_limits['joint_position'].low,
                 upper=self._robot_limits['joint_position'].high
             )
 
-            # calulate error (perhaps change to shortest angular distance withing limts)
+            # compute torque to apply
+            # TODO: perhaps change error to shortest angular distance withing limts
             error = self.target_dof_pos - self.dof_pos
+            self.target_dof_eff = self._robot_dof_gains["p_gains"] * error
+            self.target_dof_eff -= self._robot_dof_gains["d_gains"] * self.dof_vel
+
+        elif self.cfg["env"]["command_mode"] == 'velocity':
+
+            # increment actions in buffer with new actions
+            self.action_buf += actions.clone().to(self.device) * self.actions_scale
+
+            # limit to max change per step
+            self.action_buf = torch.clamp(
+                self.action_buf,
+                -self._robot_dof_properties["max_velocity_radps"],
+                self._robot_dof_properties["max_velocity_radps"]
+            )
+
+            # set new target velocity
+            self.target_dof_vel += self.action_buf
+
+            # limit new target velocity within limits
+            self.target_dof_vel = saturate(
+                self.target_dof_vel,
+                lower=self._robot_limits['joint_velocity'].low,
+                upper=self._robot_limits['joint_velocity'].high
+            )
 
             # compute torque to apply
-            computed_torque = self._robot_dof_gains["stiffness"] * error
-            computed_torque -= self._robot_dof_gains["damping"] * self.dof_vel
+            error = self.target_dof_vel - self.dof_vel
+            self.target_dof_eff = self._robot_dof_gains["d_gains"] * error
+
+        elif self.cfg["env"]["command_mode"] == 'torque':
+            # set new target effort
+            self.target_dof_eff = actions.clone().to(self.device) * self.actions_scale
 
         else:
-            msg = f"Invalid command mode. Input: {self.cfg['env']['command_mode']} not in ['torque', 'position']."
+            msg = f"Invalid command mode. Input: {self.cfg['env']['command_mode']} not in ['position', 'velocity', 'torque']."
             raise ValueError(msg)
 
         # apply clamping of computed torque to actuator limits
-        applied_torque = saturate(
-            computed_torque,
-            lower=self._robot_limits["joint_torque"].low,
-            upper=self._robot_limits["joint_torque"].high
+        self.target_dof_eff = saturate(
+            self.target_dof_eff,
+            lower=self._robot_limits["joint_effort"].low,
+            upper=self._robot_limits["joint_effort"].high
         )
 
         # set computed torques to simulator buffer.
-        self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(applied_torque))
+        self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.target_dof_eff))
 
     def compute_observations(self):
 
@@ -1227,6 +1436,7 @@ class BaseShadowModularGrasper(VecTask):
 
         # use position deltas instead of velocity tensor
         # self.hand_joint_vel = self._hand_joint_pos_history[0] - self._hand_joint_pos_history[1]
+        # self.hand_joint_acc = self._hand_joint_vel_history[0] - self._hand_joint_vel_history[1]
 
         # get object pose / vel
         self.obj_base_pos = self.root_state_tensor[self.obj_indices, 0:3]
@@ -1247,6 +1457,7 @@ class BaseShadowModularGrasper(VecTask):
 
         # append observations to history stack
         self._hand_joint_pos_history.appendleft(self.hand_joint_pos.clone())
+        self._hand_joint_vel_history.appendleft(self.hand_joint_vel.clone())
         self._object_base_pos_history.appendleft(self.obj_base_pos.clone())
         self._object_base_orn_history.appendleft(self.obj_base_orn.clone())
 
