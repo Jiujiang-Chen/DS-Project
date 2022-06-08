@@ -3,7 +3,6 @@ Train:
 python train.py task=smg_debug headless=True
 """
 
-import numpy as np
 import torch
 from isaacgym.torch_utils import to_torch
 from isaacgym import gymapi
@@ -21,10 +20,10 @@ class SMGDebug(BaseShadowModularGrasper):
         graphics_device_id,
         headless
     ):
-        cfg["env"]["numObservations"] = 174
+        cfg["env"]["numObservations"] = self.calculate_buffer_size(cfg["enabled_obs"])
 
         if cfg["asymmetric_obs"]:
-            cfg["env"]["numStates"] = 174
+            cfg["env"]["numStates"] = self.calculate_buffer_size(cfg["enabled_states"])
 
         cfg["env"]["numActions"] = 9
 
@@ -49,7 +48,7 @@ class SMGDebug(BaseShadowModularGrasper):
         )
 
         # set default joint positions
-        self._robot_limits["joint_position"].default *= 0.0
+        self._robot_limits["joint_pos"].default *= 0.0
 
     def _setup_obj(self):
         """

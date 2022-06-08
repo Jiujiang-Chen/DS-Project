@@ -40,11 +40,12 @@ env:
 
   # shared reward/termination
   episode_length: 1000
-  require_contact: False
-  contact_reward_scale: 1.0
+  require_contact: True
+  contact_reward_scale: 0.0
+  bad_contact_penalty_scale: 1.0
   action_penalty_scale: 0.0
   av_factor: 0.01
-  reach_goal_bonus: 200
+  reach_goal_bonus: 50
   fall_reset_dist: 0.15
   fall_penalty: 0.0
 
@@ -72,15 +73,16 @@ rand_params:
 
 normalize_obs: False
 asymmetric_obs: True
+
 enabled_obs:
 
     # proprio
     joint_pos: True
     joint_vel: True
-    joint_eff: True
+    joint_eff: False
     fingertip_pos: True
     fingertip_orn: True
-    last_action: True
+    latest_action: True
 
     # default contacts
     bool_tip_contacts: True
@@ -88,12 +90,12 @@ enabled_obs:
 
     # ft sensor contacts req
     ft_sensor_contact_forces: True
-    ft_sensor_contact_torques: True
+    ft_sensor_contact_torques: False
 
     # rich contacts req
-    tip_contact_positions: True
-    tip_contact_normals: True
-    tip_contact_force_mags: True
+    tip_contact_positions: False
+    tip_contact_normals: False
+    tip_contact_force_mags: False
 
     # privaliged object
     object_pos: True
@@ -108,7 +110,7 @@ enabled_obs:
 
     # task specific conditioning
     pivot_axel_vec: True
-    pivot_axel_pos: True
+    pivot_axel_pos: False
 
 enabled_states:
     # proprio
@@ -117,7 +119,7 @@ enabled_states:
     joint_eff: False
     fingertip_pos: True
     fingertip_orn: True
-    last_action: True
+    latest_action: True
 
     # default contacts
     bool_tip_contacts: True
@@ -128,9 +130,9 @@ enabled_states:
     ft_sensor_contact_torques: True
 
     # rich contacts req
-    tip_contact_positions: True
-    tip_contact_normals: True
-    tip_contact_force_mags: True
+    tip_contact_positions: False
+    tip_contact_normals: False
+    tip_contact_force_mags: False
 
     # privaliged object
     object_pos: True
@@ -145,7 +147,7 @@ enabled_states:
 
     # task specific conditioning
     pivot_axel_vec: True
-    pivot_axel_pos: True
+    pivot_axel_pos: False
 
 sim:
   dt: 0.016667
@@ -153,6 +155,7 @@ sim:
   up_axis: "z"
   use_gpu_pipeline: ${eq:${...pipeline},"gpu"}
   gravity: [0.0, 0.0, -9.81]
+  # gravity: [0.0, 0.0, 0.0]
   physx:
     num_threads: ${....num_threads}
     solver_type: ${....solver_type}

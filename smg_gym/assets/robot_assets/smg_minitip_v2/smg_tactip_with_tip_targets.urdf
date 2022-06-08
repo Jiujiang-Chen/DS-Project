@@ -289,6 +289,34 @@
     <origin rpy="1.57 0 0" xyz="0.0 -0.0125 0.0575"/>
   </joint>
 
+  <!-- Target -->
+  <link name="F1_target_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="tip/smg_tactip_target.stl"/>
+      </geometry>
+       <material name="Green"/>
+    </visual>
+    <inertial>
+      <mass value="0.0"/>
+      <origin rpy="0.0 0.0 0.0" xyz="0.0 0.0 0.0"/>
+      <inertia ixx="1.0" ixy="0.0" ixz="0.0" iyy="1.0" iyz="0.0" izz="1.0"/>
+    </inertial>
+    <collision>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <geometry>
+          <mesh filename="tip/smg_tactip_target.stl"/>
+        </geometry>
+    </collision>
+  </link>
+
+  <joint name="F1_target_joint" type="fixed">
+    <parent link="SMG_F1_tactip_body"/>
+    <child link="F1_target_link"/>
+    <origin rpy="0 0 0" xyz="0.0 -0.013 0.0575"/>
+  </joint>
+
   <!-- TCP -->
   <link name="F1_tcp_link">
     <visual>
@@ -490,6 +518,34 @@
     <parent link="SMG_F2_tactip_body"/>
     <child link="SMG_F2_tactip_tip"/>
     <origin rpy="1.57 0 0" xyz="0.0 -0.0125 0.0575"/>
+  </joint>
+
+  <!-- Target -->
+  <link name="F2_target_link">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="tip/smg_tactip_target.stl"/>
+      </geometry>
+       <material name="Green"/>
+    </visual>
+    <inertial>
+      <mass value="0.0"/>
+      <origin rpy="0.0 0.0 0.0" xyz="0.0 0.0 0.0"/>
+      <inertia ixx="1.0" ixy="0.0" ixz="0.0" iyy="1.0" iyz="0.0" izz="1.0"/>
+    </inertial>
+    <collision>
+        <origin rpy="0 0 0" xyz="0 0 0"/>
+        <geometry>
+          <mesh filename="tip/smg_tactip_target.stl"/>
+        </geometry>
+    </collision>
+  </link>
+
+  <joint name="F2_target_joint" type="fixed">
+    <parent link="SMG_F2_tactip_body"/>
+    <child link="F2_target_link"/>
+    <origin rpy="0 0 0" xyz="0.0 -0.013 0.0575"/>
   </joint>
 
   <!-- TCP -->
@@ -704,7 +760,7 @@
       <geometry>
         <mesh filename="tip/smg_tactip_target.stl"/>
       </geometry>
-       <material name="TransparentRed"/>
+       <material name="Green"/>
     </visual>
     <inertial>
       <mass value="0.0"/>
@@ -716,14 +772,13 @@
         <geometry>
           <mesh filename="tip/smg_tactip_target.stl"/>
         </geometry>
-        <material name="TransparentRed"/>
     </collision>
   </link>
 
   <joint name="F3_target_joint" type="fixed">
     <parent link="SMG_F3_tactip_body"/>
     <child link="F3_target_link"/>
-    <origin rpy="0 0 0" xyz="0.0 -0.0125 0.0575"/>
+    <origin rpy="0 0 0" xyz="0.0 -0.013 0.0575"/>
   </joint>
 
   <!-- TCP -->

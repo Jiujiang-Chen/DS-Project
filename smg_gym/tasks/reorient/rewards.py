@@ -106,6 +106,7 @@ def compute_keypoint_reorient_reward(
     goal_kps: torch.Tensor,
     actions: torch.Tensor,
     n_tip_contacts: torch.Tensor,
+    n_non_tip_contacts: torch.Tensor,
     lgsk_scale: float,
     lgsk_eps: float,
     kp_dist_scale: float,
@@ -114,6 +115,7 @@ def compute_keypoint_reorient_reward(
     fall_reset_dist: float,
     require_contact: bool,
     contact_reward_scale: float,
+    bad_contact_penalty_scale: float,
     action_penalty_scale: float,
     reach_goal_bonus: float,
     fall_penalty: float,
@@ -137,6 +139,9 @@ def compute_keypoint_reorient_reward(
 
     # add reward for maintaining tips in contact
     total_reward = torch.where(n_tip_contacts < 2, total_reward, total_reward + contact_reward_scale)
+
+    # add penalty for contacting with links other than the tips
+    total_reward = torch.where(n_non_tip_contacts > 0, total_reward - bad_contact_penalty_scale, total_reward)
 
     # zero reward when less than 2 tips in contact
     if require_contact:
@@ -171,6 +176,7 @@ def compute_keypoint_reorient_reward(
         'cons_successes': cons_successes,
         'action_penalty': action_penalty,
         'num_tip_contacts': n_tip_contacts,
+        'num_non_tip_contacts': n_non_tip_contacts,
         'total_reward': total_reward,
     }
 

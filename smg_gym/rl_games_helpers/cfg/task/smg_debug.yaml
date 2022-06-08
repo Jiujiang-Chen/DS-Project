@@ -62,47 +62,48 @@ rand_params:
   randomize: False
   rand_hand_joints: False
   rand_obj_init_orn: False
-  rand_obj_scale: True
+  rand_obj_scale: False
 
-normalize_obs: True
-asymmetric_obs: False
+normalize_obs: False
+asymmetric_obs: True
+
 enabled_obs:
 
     # proprio
     joint_pos: True
-    joint_vel: True
-    joint_eff: True
+    joint_vel: False
+    joint_eff: False
     fingertip_pos: True
     fingertip_orn: True
-    last_action: True
+    latest_action: True
 
     # default contacts
-    bool_tip_contacts: True
-    net_tip_contact_forces: True
+    bool_tip_contacts: False
+    net_tip_contact_forces: False
 
     # ft sensor contacts req
-    ft_sensor_contact_forces: True
-    ft_sensor_contact_torques: True
+    ft_sensor_contact_forces: False
+    ft_sensor_contact_torques: False
 
     # rich contacts req
-    tip_contact_positions: True
-    tip_contact_normals: True
-    tip_contact_force_mags: True
+    tip_contact_positions: False
+    tip_contact_normals: False
+    tip_contact_force_mags: False
 
     # privaliged object
-    object_pos: True
-    object_orn: True
-    object_kps: True
-    object_linvel: True
-    object_angvel: True
-    goal_pos: True
-    goal_orn: True
-    goal_kps: True
-    active_quat: True
+    object_pos: False
+    object_orn: False
+    object_kps: False
+    object_linvel: False
+    object_angvel: False
+    goal_pos: False
+    goal_orn: False
+    goal_kps: False
+    active_quat: False
 
     # task specific conditioning
     pivot_axel_vec: True
-    pivot_axel_pos: True
+    pivot_axel_pos: False
 
 enabled_states:
     # proprio
@@ -111,7 +112,7 @@ enabled_states:
     joint_eff: True
     fingertip_pos: True
     fingertip_orn: True
-    last_action: True
+    latest_action: True
 
     # default contacts
     bool_tip_contacts: True

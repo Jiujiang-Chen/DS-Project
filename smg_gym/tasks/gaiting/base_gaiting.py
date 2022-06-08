@@ -133,8 +133,8 @@ class BaseGaiting(BaseShadowModularGrasper):
 
         # reset envs
         if len(env_ids_for_reset) > 0:
-            self.reset_hand(env_ids_for_reset)
             self.reset_object(env_ids_for_reset)
+            self.reset_hand(env_ids_for_reset)
             self.reset_target_pose(env_ids_for_reset)
             self.reset_target_axis(env_ids_for_reset)
             self.rotate_target_pose(env_ids_for_reset)
@@ -161,6 +161,7 @@ class BaseGaiting(BaseShadowModularGrasper):
 
         # reset buffers
         self.progress_buf[env_ids_for_reset] = 0
+        self.action_buf[env_ids_for_reset] = 0
         self.reset_buf[env_ids_for_reset] = 0
         self.successes[env_ids_for_reset] = 0
 
@@ -175,15 +176,15 @@ class BaseGaiting(BaseShadowModularGrasper):
         start_offset, end_offset = self.standard_fill_buffer(self.obs_buf, obs_cfg)
 
         # target pivot axel vec
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.VecDim.value
         if obs_cfg["pivot_axel_vec"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.VecDim.value
             self.obs_buf[:, start_offset:end_offset] = self.pivot_axel_workframe
 
         # target pivot axel pos
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.PosDim.value
         if obs_cfg["pivot_axel_pos"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.PosDim.value
             self.obs_buf[:, start_offset:end_offset] = self.pivot_point_pos_offset
 
         return self.obs_buf
@@ -202,15 +203,15 @@ class BaseGaiting(BaseShadowModularGrasper):
         start_offset, end_offset = self.standard_fill_buffer(self.states_buf, states_cfg)
 
         # target pivot axel vec
-        start_offset = end_offset
-        end_offset = start_offset + 3
         if states_cfg["pivot_axel_vec"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.VecDim.value
             self.states_buf[:, start_offset:end_offset] = self.pivot_axel_workframe
 
         # target pivot axel pos
-        start_offset = end_offset
-        end_offset = start_offset + 3
         if states_cfg["pivot_axel_pos"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.PosDim.value
             self.states_buf[:, start_offset:end_offset] = self.pivot_point_pos_offset
 
         return self.states_buf
@@ -282,6 +283,7 @@ class BaseGaiting(BaseShadowModularGrasper):
                 goal_kps=centered_goal_kp_pos,
                 actions=self.action_buf,
                 n_tip_contacts=self.n_tip_contacts,
+                n_non_tip_contacts=self.n_non_tip_contacts,
                 lgsk_scale=self.cfg["env"]["lgsk_scale"],
                 lgsk_eps=self.cfg["env"]["lgsk_eps"],
                 kp_dist_scale=self.cfg["env"]["kp_dist_scale"],
@@ -290,6 +292,7 @@ class BaseGaiting(BaseShadowModularGrasper):
                 fall_reset_dist=self.cfg["env"]["fall_reset_dist"],
                 require_contact=self.cfg["env"]["require_contact"],
                 contact_reward_scale=self.cfg["env"]["contact_reward_scale"],
+                bad_contact_penalty_scale=self.cfg["env"]["bad_contact_penalty_scale"],
                 action_penalty_scale=self.cfg["env"]["action_penalty_scale"],
                 reach_goal_bonus=self.cfg["env"]["reach_goal_bonus"],
                 fall_penalty=self.cfg["env"]["fall_penalty"],

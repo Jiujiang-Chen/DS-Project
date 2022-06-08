@@ -123,14 +123,17 @@ def simple_run_agent(player, use_csv_actions=True):
             list(obses[0, 48:57].cpu().numpy()),
         ]
 
-    obses = player.env_reset(player.env)
+    # obs = player.env_reset(player.env)
+    obs_dict = player.env_reset_with_state(player.env)
+    obs = obs_dict['obs']
+    states = obs_dict['states']
 
     if use_csv_actions:
         actions = np.array(ref_df.loc[row_counter]['actions'])[np.newaxis, ...]
     else:
-        actions = player.get_action(obses[np.newaxis, ...], is_determenistic=True).cpu().numpy()[np.newaxis, ...]
+        actions = player.get_action(obs[np.newaxis, ...], is_determenistic=True).cpu().numpy()[np.newaxis, ...]
 
-    add_to_csv(obses, actions, row_counter)
+    add_to_csv(states, actions, row_counter)
     row_counter += 1
 
     for n in range(max_steps):
@@ -138,11 +141,13 @@ def simple_run_agent(player, use_csv_actions=True):
         if use_csv_actions:
             actions = np.array(ref_df.loc[row_counter-1]['actions'])[np.newaxis, ...]
         else:
-            actions = player.get_action(obses[np.newaxis, ...], is_determenistic=True).cpu().numpy()[np.newaxis, ...]
+            actions = player.get_action(obs[np.newaxis, ...], is_determenistic=True).cpu().numpy()[np.newaxis, ...]
 
-        obses, r, done, info = player.env_step(player.env, actions)
+        obs_dict, r, done, info = player.env_step_with_state(player.env, actions)
+        obs = obs_dict['obs']
+        states = obs_dict['states']
 
-        add_to_csv(obses, actions, row_counter)
+        add_to_csv(states, actions, row_counter)
         row_counter += 1
 
     # save data

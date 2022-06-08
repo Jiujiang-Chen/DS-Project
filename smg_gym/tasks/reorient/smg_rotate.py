@@ -38,7 +38,11 @@ class SMGRotate(BaseReorient):
 
         total = 99
         """
-        cfg["env"]["numObservations"] = 99
+        cfg["env"]["numObservations"] = self.calculate_buffer_size(cfg["enabled_obs"])
+
+        if cfg["asymmetric_obs"]:
+            cfg["env"]["numStates"] = self.calculate_buffer_size(cfg["enabled_states"])
+
         cfg["env"]["numActions"] = 9
 
         super(SMGRotate, self).__init__(

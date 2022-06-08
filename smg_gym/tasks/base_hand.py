@@ -1,3 +1,4 @@
+import time
 from typing import Deque
 import numpy as np
 import torch
@@ -24,7 +25,7 @@ from smg_gym.tasks.smg_object_task_params import SMGObjectTaskDimensions
 from smg_gym.tasks.smg_object_task_params import object_properties
 from smg_gym.tasks.smg_object_task_params import robot_limits
 from smg_gym.tasks.smg_object_task_params import object_limits
-from smg_gym.tasks.smg_object_task_params import target_limits
+from smg_gym.tasks.smg_object_task_params import goal_limits
 from smg_gym.tasks.smg_object_task_params import robot_dof_gains
 from smg_gym.tasks.smg_object_task_params import robot_dof_properties
 from smg_gym.tasks.smg_object_task_params import control_joint_names
@@ -47,7 +48,7 @@ class BaseShadowModularGrasper(VecTask):
     _object_limits = object_limits
 
     # limits of the target (mapped later: str -> torch.tensor)
-    _target_limits = target_limits
+    _goal_limits = goal_limits
 
     # PD gains for the robot (mapped later: str -> torch.tensor)
     _robot_dof_gains = robot_dof_gains
@@ -141,9 +142,9 @@ class BaseShadowModularGrasper(VecTask):
             for prop, value in limit_dict.items():
                 limit_dict[prop] = torch.tensor(value, dtype=torch.float, device=self.device)
 
-        for limit_name in self._target_limits:
+        for limit_name in self._goal_limits:
             # extract limit simple-namespace
-            limit_dict = self._target_limits[limit_name].__dict__
+            limit_dict = self._goal_limits[limit_name].__dict__
             # iterate over namespace attributes
             for prop, value in limit_dict.items():
                 limit_dict[prop] = torch.tensor(value, dtype=torch.float, device=self.device)
@@ -221,100 +222,44 @@ class BaseShadowModularGrasper(VecTask):
         Configures the observations, state and action spaces.
         """
 
-        # change obs action scale dependent on mode
-        if self.cfg["env"]["command_mode"] == 'position':
-            obs_action_scale = self._robot_limits["latest_action_pos"]
-        elif self.cfg["env"]["command_mode"] == 'velocity':
-            obs_action_scale = self._robot_limits["latest_action_vel"]
-        elif self.cfg["env"]["command_mode"] == 'effort':
-            obs_action_scale = self._robot_limits["latest_action_eff"]
-
         # Note: This is order sensitive.
-        self._observations_scale.low = torch.cat([
+        # observations should be appended in the same order as defined in the config
+        def get_scale_limits(cfg):
+            scale_low, scale_high = [], []
+            for key in cfg:
+                if cfg[key]:
+                    if key in self._robot_limits.keys():
+                        scale_low.append(self._robot_limits[key].low)
+                        scale_high.append(self._robot_limits[key].high)
+                    elif key in self._object_limits.keys():
+                        scale_low.append(self._object_limits[key].low)
+                        scale_high.append(self._object_limits[key].high)
+                    elif key in self._goal_limits.keys():
+                        scale_low.append(self._goal_limits[key].low)
+                        scale_high.append(self._goal_limits[key].high)
+            return scale_low, scale_high
 
-            # proprio
-            self._robot_limits["joint_position"].low,
-            self._robot_limits["joint_velocity"].low,
-            self._robot_limits["joint_effort"].low,
-            self._robot_limits["fingertip_position"].low,
-            self._robot_limits["fingertip_orientation"].low,
+        obs_scale_low, obs_scale_high = get_scale_limits(self.cfg["enabled_obs"])
+        self._observations_scale.low = torch.cat(obs_scale_low)
+        self._observations_scale.high = torch.cat(obs_scale_high)
 
-            # action
-            obs_action_scale.low,
+        state_scale_low, state_scale_high = get_scale_limits(self.cfg["enabled_states"])
+        self._states_scale.low = torch.cat(state_scale_low)
+        self._states_scale.high = torch.cat(state_scale_high)
 
-            # tactile
-            self._robot_limits["bool_tip_contacts"].low,
-            self._robot_limits["net_tip_contact_forces"].low,
-            self._robot_limits["ft_sensor_contact_forces"].low,
-            self._robot_limits["ft_sensor_contact_torques"].low,
-            self._robot_limits["tip_contact_positions"].low,
-            self._robot_limits["tip_contact_normals"].low,
-            self._robot_limits["tip_contact_force_mags"].low,
-
-            # object
-            self._object_limits["position"].low,
-            self._object_limits["orientation"].low,
-            self._object_limits["keypoint_position"].low,
-            self._object_limits["linear_velocity"].low,
-            self._object_limits["angular_velocity"].low,
-
-            # target
-            self._target_limits["position"].low,
-            self._target_limits["orientation"].low,
-            self._target_limits["keypoint_position"].low,
-            self._target_limits["active_quat"].low,
-
-            # gaiting conditions
-            self._target_limits["pivot_axel_vector"].low,
-            self._target_limits["pivot_axel_position"].low,
-        ])
-
-        self._observations_scale.high = torch.cat([
-
-            # proprio
-            self._robot_limits["joint_position"].high,
-            self._robot_limits["joint_velocity"].high,
-            self._robot_limits["joint_effort"].high,
-            self._robot_limits["fingertip_position"].high,
-            self._robot_limits["fingertip_orientation"].high,
-
-            # action
-            obs_action_scale.high,
-
-            # tactile
-            self._robot_limits["bool_tip_contacts"].high,
-            self._robot_limits["net_tip_contact_forces"].high,
-            self._robot_limits["ft_sensor_contact_forces"].high,
-            self._robot_limits["ft_sensor_contact_torques"].high,
-            self._robot_limits["tip_contact_positions"].high,
-            self._robot_limits["tip_contact_normals"].high,
-            self._robot_limits["tip_contact_force_mags"].high,
-
-            # object
-            self._object_limits["position"].high,
-            self._object_limits["orientation"].high,
-            self._object_limits["keypoint_position"].high,
-            self._object_limits["linear_velocity"].high,
-            self._object_limits["angular_velocity"].high,
-
-            # target
-            self._target_limits["position"].high,
-            self._target_limits["orientation"].high,
-            self._target_limits["keypoint_position"].high,
-            self._target_limits["active_quat"].high,
-
-            # gaiting conditions
-            self._target_limits["pivot_axel_vector"].high,
-            self._target_limits["pivot_axel_position"].high,
-        ])
-
-        # check that dimensions match
-        # observations
+        # check that dimensions match observations
         if self._observations_scale.low.shape[0] != self.num_obs or self._observations_scale.high.shape[0] != self.num_obs:
             msg = f"Observation scaling dimensions mismatch. " \
                   f"\tLow: {self._observations_scale.low.shape[0]}, " \
                   f"\tHigh: {self._observations_scale.high.shape[0]}, " \
                   f"\tExpected: {self.num_obs}."
+            raise AssertionError(msg)
+
+        if self._states_scale.low.shape[0] != self.num_states or self._states_scale.high.shape[0] != self.num_states:
+            msg = f"States scaling dimensions mismatch. " \
+                  f"\tLow: {self._states_scale.low.shape[0]}, " \
+                  f"\tHigh: {self._states_scale.high.shape[0]}, " \
+                  f"\tExpected: {self.num_states}."
             raise AssertionError(msg)
 
     def initialize_state_history_buffers(self):
@@ -403,6 +348,7 @@ class BaseShadowModularGrasper(VecTask):
         # TODO: remove hardcoded tip indices (be careful of merged fixed links)
         # set the tip dynamics
         tip_shape_indices = [7, 14, 21]
+        # tip_shape_indices = [8, 16, 24]
         for idx in tip_shape_indices:
             p = hand_props[idx]
             p.friction = 2.0
@@ -669,8 +615,8 @@ class BaseShadowModularGrasper(VecTask):
             hand_dof_props['effort'][dof_index] = self._robot_dof_properties["max_torque_Nm"]
             hand_dof_props['velocity'][dof_index] = self._robot_dof_properties["max_velocity_radps"]
             hand_dof_props['friction'][dof_index] = self._robot_dof_properties["friction"][dof_index]
-            hand_dof_props['lower'][dof_index] = float(self._robot_limits["joint_position"].low[dof_index])
-            hand_dof_props['upper'][dof_index] = float(self._robot_limits["joint_position"].high[dof_index])
+            hand_dof_props['lower'][dof_index] = float(self._robot_limits["joint_pos"].low[dof_index])
+            hand_dof_props['upper'][dof_index] = float(self._robot_limits["joint_pos"].high[dof_index])
 
         self.gym.set_actor_dof_properties(env_ptr, handle, hand_dof_props)
 
@@ -739,13 +685,20 @@ class BaseShadowModularGrasper(VecTask):
         return handle
 
     def _setup_contact_tracking(self):
-        self.n_tips = 3
 
         hand_body_names = self.gym.get_asset_rigid_body_names(self.hand_asset)
         tip_body_names = [name for name in hand_body_names if "tactip_tip" in name]
+        non_tip_body_names = [name for name in hand_body_names if "tactip_tip" not in name]
+        # tip_body_names = [name for name in hand_body_names if "target" in name]
+        # non_tip_body_names = [name for name in hand_body_names if "target" not in name]
         self.tip_body_idxs = [
             self.gym.find_asset_rigid_body_index(self.hand_asset, name) for name in tip_body_names
         ]
+        self.non_tip_body_idxs = [
+            self.gym.find_asset_rigid_body_index(self.hand_asset, name) for name in non_tip_body_names
+        ]
+        self.n_tips = 3
+        self.n_non_tip_links = len(self.non_tip_body_idxs)
 
         # add ft sensors to fingertips
         if self.contact_sensor_modality == 'ft_sensor':
@@ -794,6 +747,15 @@ class BaseShadowModularGrasper(VecTask):
             torch.zeros(size=(self.num_envs, self.n_tips), device=self.device),
         )
 
+        # get all the contacted links that are not the tip
+        net_non_tip_contact_forces = self.contact_force_tensor[:, self.non_tip_body_idxs, :]
+        bool_non_tip_contacts = torch.where(
+            torch.count_nonzero(net_non_tip_contact_forces, dim=2) > 0,
+            torch.ones(size=(self.num_envs, self.n_non_tip_links), device=self.device),
+            torch.zeros(size=(self.num_envs, self.n_non_tip_links), device=self.device),
+        )
+        n_non_tip_contacts = torch.sum(bool_non_tip_contacts, dim=1)
+
         # repeat for n_tips shape=(n_envs, n_tips)
         onehot_obj_contacts = bool_obj_contacts.unsqueeze(1).repeat(1, self.n_tips)
 
@@ -805,7 +767,7 @@ class BaseShadowModularGrasper(VecTask):
         )
         n_tip_contacts = torch.sum(bool_tip_contacts, dim=1)
 
-        return net_tip_contact_forces, tip_object_contacts, n_tip_contacts
+        return net_tip_contact_forces, tip_object_contacts, n_tip_contacts, n_non_tip_contacts
 
     def get_rich_fingertip_contacts(self):
         """
@@ -900,155 +862,210 @@ class BaseShadowModularGrasper(VecTask):
     def standard_fill_buffer(self, buf, buf_cfg):
         """
         Fill observation buffer with observations shared across different tasks.
-
-        Change offset outside of conditional to keep the same indices in the buffer, allows for disabling
-        observations after learning.
         """
 
         start_offset, end_offset = 0, 0
 
         # joint position
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.JointPositionDim.value
         if buf_cfg["joint_pos"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.JointPositionDim.value
             buf[:, start_offset:end_offset] = self.hand_joint_pos
 
         # joint velocity
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.JointVelocityDim.value
         if buf_cfg["joint_vel"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.JointVelocityDim.value
             buf[:, start_offset:end_offset] = self.hand_joint_vel
 
         # joint dof force
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.JointTorqueDim.value
         if buf_cfg["joint_eff"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.JointTorqueDim.value
             buf[:, start_offset:end_offset] = self.dof_force_tensor
 
         # fingertip positions
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.FingertipPosDim.value
         if buf_cfg["fingertip_pos"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.FingertipPosDim.value
             buf[:, start_offset:end_offset] = self.fingertip_pos
 
         # fingertip orn
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.FingertipOrnDim.value
         if buf_cfg["fingertip_orn"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.FingertipOrnDim.value
             buf[:, start_offset:end_offset] = self.fingertip_orn.reshape(
                 self.num_envs, self._dims.FingertipOrnDim.value)
 
         # latest actions
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.ActionDim.value
-        if buf_cfg["last_action"]:
+        if buf_cfg["latest_action"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.ActionDim.value
             buf[:, start_offset:end_offset] = self.action_buf
 
         # boolean tips in contacts
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.NumFingers.value
         if buf_cfg["bool_tip_contacts"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.NumFingers.value
             buf[:, start_offset:end_offset] = self.tip_object_contacts
 
         # tip contact forces
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.FingerContactForceDim.value
         if buf_cfg["net_tip_contact_forces"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.FingerContactForceDim.value
             buf[:, start_offset:end_offset] = self.net_tip_contact_forces.reshape(
                 self.num_envs, self._dims.FingerContactForceDim.value)
 
         # tip contact forces (ft sensors enabled)
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.FingerContactForceDim.value
         if buf_cfg["ft_sensor_contact_forces"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.FingerContactForceDim.value
             buf[:, start_offset:end_offset] = self.force_sensor_tensor[:, :, 0:3].reshape(
                 self.num_envs, self._dims.FingerContactForceDim.value)
 
         # tip contact torques (ft sensors enabled)
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.FingerContactTorqueDim.value
         if buf_cfg["ft_sensor_contact_torques"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.FingerContactTorqueDim.value
             buf[:, start_offset:end_offset] = self.force_sensor_tensor[:, :, 3:6].reshape(
                 self.num_envs, self._dims.FingerContactTorqueDim.value)
 
         # tip contact positions (rich contacts enabled)
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.FingertipPosDim.value
         if buf_cfg["tip_contact_positions"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.FingertipPosDim.value
             buf[:, start_offset:end_offset] = self.contact_positions.reshape(
                 self.num_envs, self._dims.FingertipPosDim.value)
 
         # tip contact normals (rich contacts enabled)
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.FingerContactForceDim.value
         if buf_cfg["tip_contact_normals"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.FingerContactForceDim.value
             buf[:, start_offset:end_offset] = self.contact_normals.reshape(
                 self.num_envs, self._dims.FingerContactForceDim.value)
 
         # tip contact force magnitudes (rich contacts enabled)
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.NumFingers.value
         if buf_cfg["tip_contact_force_mags"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.NumFingers.value
             buf[:, start_offset:end_offset] = self.contact_force_mags.reshape(
                 self.num_envs, self._dims.NumFingers.value)
 
         # object position
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.PosDim.value
         if buf_cfg["object_pos"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.PosDim.value
             buf[:, start_offset:end_offset] = self.obj_base_pos
 
         # object orientation
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.OrnDim.value
         if buf_cfg["object_orn"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.OrnDim.value
             buf[:, start_offset:end_offset] = self.obj_base_orn
 
         # object keypoints
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.KeypointPosDim.value
         if buf_cfg["object_kps"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.KeypointPosDim.value
             buf[:, start_offset:end_offset] = (self.obj_kp_positions
                                                - self.obj_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
 
         # object linear velocity
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.LinearVelocityDim.value
         if buf_cfg["object_linvel"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.LinearVelocityDim.value
             buf[:, start_offset:end_offset] = self.obj_base_linvel
 
         # object angular velocity
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.AngularVelocityDim.value
         if buf_cfg["object_angvel"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.AngularVelocityDim.value
             buf[:, start_offset:end_offset] = self.obj_base_angvel
 
         # goal position
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.PosDim.value
         if buf_cfg["goal_pos"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.PosDim.value
             buf[:, start_offset:end_offset] = self.goal_base_pos
 
         # goal orientation
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.OrnDim.value
         if buf_cfg["goal_orn"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.OrnDim.value
             buf[:, start_offset:end_offset] = self.goal_base_orn
 
         # goal keypoints
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.KeypointPosDim.value
         if buf_cfg["goal_kps"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.KeypointPosDim.value
             buf[:, start_offset:end_offset] = (
                 self.goal_kp_positions - self.goal_displacement_tensor).reshape(self.num_envs, self._dims.KeypointPosDim.value)
 
         # active quat between goal and object
-        start_offset = end_offset
-        end_offset = start_offset + self._dims.OrnDim.value
         if buf_cfg["active_quat"]:
-            self.obs_buf[:, start_offset:end_offset] = quat_mul(self.obj_base_orn, quat_conjugate(self.goal_base_orn))
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.OrnDim.value
+            buf[:, start_offset:end_offset] = quat_mul(self.obj_base_orn, quat_conjugate(self.goal_base_orn))
 
         return start_offset, end_offset
+
+    def calculate_buffer_size(self, buf_cfg):
+        """
+        Calculate size of the buffer for observations and states.
+        """
+
+        buf_size = 0
+
+        if buf_cfg["joint_pos"]:
+            buf_size += self._dims.JointPositionDim.value
+        if buf_cfg["joint_vel"]:
+            buf_size += self._dims.JointVelocityDim.value
+        if buf_cfg["joint_eff"]:
+            buf_size += self._dims.JointTorqueDim.value
+        if buf_cfg["fingertip_pos"]:
+            buf_size += self._dims.FingertipPosDim.value
+        if buf_cfg["fingertip_orn"]:
+            buf_size += self._dims.FingertipOrnDim.value
+        if buf_cfg["latest_action"]:
+            buf_size += self._dims.ActionDim.value
+        if buf_cfg["bool_tip_contacts"]:
+            buf_size += self._dims.NumFingers.value
+        if buf_cfg["net_tip_contact_forces"]:
+            buf_size += self._dims.FingerContactForceDim.value
+        if buf_cfg["ft_sensor_contact_forces"]:
+            buf_size += self._dims.FingerContactForceDim.value
+        if buf_cfg["ft_sensor_contact_torques"]:
+            buf_size += self._dims.FingerContactTorqueDim.value
+        if buf_cfg["tip_contact_positions"]:
+            buf_size += self._dims.FingertipPosDim.value
+        if buf_cfg["tip_contact_normals"]:
+            buf_size += self._dims.FingerContactForceDim.value
+        if buf_cfg["tip_contact_force_mags"]:
+            buf_size += self._dims.NumFingers.value
+        if buf_cfg["object_pos"]:
+            buf_size += self._dims.PosDim.value
+        if buf_cfg["object_orn"]:
+            buf_size += self._dims.OrnDim.value
+        if buf_cfg["object_kps"]:
+            buf_size += self._dims.KeypointPosDim.value
+        if buf_cfg["object_linvel"]:
+            buf_size += self._dims.LinearVelocityDim.value
+        if buf_cfg["object_angvel"]:
+            buf_size += self._dims.AngularVelocityDim.value
+        if buf_cfg["goal_pos"]:
+            buf_size += self._dims.PosDim.value
+        if buf_cfg["goal_orn"]:
+            buf_size += self._dims.OrnDim.value
+        if buf_cfg["goal_kps"]:
+            buf_size += self._dims.KeypointPosDim.value
+        if buf_cfg["active_quat"]:
+            buf_size += self._dims.OrnDim.value
+        if buf_cfg["pivot_axel_vec"]:
+            buf_size += self._dims.VecDim.value
+        if buf_cfg["pivot_axel_pos"]:
+            buf_size += self._dims.PosDim.value
+
+        return buf_size
 
     def norm_obs_state_buffer(self):
         """
@@ -1065,8 +1082,8 @@ class BaseShadowModularGrasper(VecTask):
             if self.cfg["asymmetric_obs"]:
                 self.states_buf = scale_transform(
                     self.states_buf,
-                    lower=self._observations_scale.low,
-                    upper=self._observations_scale.high
+                    lower=self._states_scale.low,
+                    upper=self._states_scale.high
                 )
 
     def compute_reward_and_termination(self):
@@ -1087,16 +1104,16 @@ class BaseShadowModularGrasper(VecTask):
             rand_stddev = torch_rand_float(-1.0, 1.0, (num_envs_to_reset, self.n_hand_dofs), device=self.device)
 
             # add noise to DOF positions
-            delta_max = self._robot_limits["joint_position"].rand_uplim - self._robot_limits["joint_position"].default
-            delta_min = self._robot_limits["joint_position"].rand_lolim - self._robot_limits["joint_position"].default
-            target_dof_pos = self._robot_limits["joint_position"].default + \
+            delta_max = self._robot_limits["joint_pos"].rand_uplim - self._robot_limits["joint_pos"].default
+            delta_min = self._robot_limits["joint_pos"].rand_lolim - self._robot_limits["joint_pos"].default
+            target_dof_pos = self._robot_limits["joint_pos"].default + \
                 delta_min + (delta_max - delta_min) * rand_stddev
         else:
-            target_dof_pos = self._robot_limits["joint_position"].default
+            target_dof_pos = self._robot_limits["joint_pos"].default
 
         # get default velocity and effort
-        target_dof_vel = self._robot_limits["joint_velocity"].default
-        target_dof_eff = self._robot_limits["joint_effort"].default
+        target_dof_vel = self._robot_limits["joint_vel"].default
+        target_dof_eff = self._robot_limits["joint_eff"].default
 
         self.target_dof_pos[env_ids_for_reset, :self.n_hand_dofs] = target_dof_pos
         self.target_dof_vel[env_ids_for_reset, :self.n_hand_dofs] = target_dof_vel
@@ -1280,8 +1297,8 @@ class BaseShadowModularGrasper(VecTask):
             # limit new target position within joint limits
             self.target_dof_pos = saturate(
                 self.target_dof_pos,
-                lower=self._robot_limits['joint_position'].low,
-                upper=self._robot_limits['joint_position'].high
+                lower=self._robot_limits['joint_pos'].low,
+                upper=self._robot_limits['joint_pos'].high
             )
 
             # send target position to sim
@@ -1304,8 +1321,8 @@ class BaseShadowModularGrasper(VecTask):
             # limit new target velocity within limits
             self.target_dof_vel = saturate(
                 self.target_dof_vel,
-                lower=self._robot_limits['joint_velocity'].low,
-                upper=self._robot_limits['joint_velocity'].high
+                lower=self._robot_limits['joint_vel'].low,
+                upper=self._robot_limits['joint_vel'].high
             )
 
             # send target velocity to sim
@@ -1320,8 +1337,8 @@ class BaseShadowModularGrasper(VecTask):
             # limit new target velocity within joint limits
             self.target_dof_eff = saturate(
                 self.target_dof_eff,
-                lower=self._robot_limits["joint_effort"].low,
-                upper=self._robot_limits["joint_effort"].high
+                lower=self._robot_limits["joint_eff"].low,
+                upper=self._robot_limits["joint_eff"].high
             )
 
             # set computed torques to simulator buffer.
@@ -1353,8 +1370,8 @@ class BaseShadowModularGrasper(VecTask):
             # limit new target position within joint limits
             self.target_dof_pos = saturate(
                 self.target_dof_pos,
-                lower=self._robot_limits['joint_position'].low,
-                upper=self._robot_limits['joint_position'].high
+                lower=self._robot_limits['joint_pos'].low,
+                upper=self._robot_limits['joint_pos'].high
             )
 
             # compute torque to apply
@@ -1381,8 +1398,8 @@ class BaseShadowModularGrasper(VecTask):
             # limit new target velocity within limits
             self.target_dof_vel = saturate(
                 self.target_dof_vel,
-                lower=self._robot_limits['joint_velocity'].low,
-                upper=self._robot_limits['joint_velocity'].high
+                lower=self._robot_limits['joint_vel'].low,
+                upper=self._robot_limits['joint_vel'].high
             )
 
             # compute torque to apply
@@ -1400,8 +1417,8 @@ class BaseShadowModularGrasper(VecTask):
         # apply clamping of computed torque to actuator limits
         self.target_dof_eff = saturate(
             self.target_dof_eff,
-            lower=self._robot_limits["joint_effort"].low,
-            upper=self._robot_limits["joint_effort"].high
+            lower=self._robot_limits["joint_eff"].low,
+            upper=self._robot_limits["joint_eff"].high
         )
 
         # set computed torques to simulator buffer.
@@ -1413,7 +1430,10 @@ class BaseShadowModularGrasper(VecTask):
         if self.contact_sensor_modality == 'rich_cpu':
             self.get_rich_fingertip_contacts()
 
-        self.net_tip_contact_forces, self.tip_object_contacts, self.n_tip_contacts = self.get_fingertip_contacts()
+        (self.net_tip_contact_forces,
+         self.tip_object_contacts,
+         self.n_tip_contacts,
+         self.n_non_tip_contacts) = self.get_fingertip_contacts()
 
         # print('')
         # print('force sensor contact')

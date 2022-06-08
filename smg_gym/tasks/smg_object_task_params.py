@@ -81,50 +81,39 @@ control_joint_names = [
 
 # limits of the robot (mapped later: str -> torch.tensor)
 robot_limits = {
-    "joint_position": SimpleNamespace(
+    "joint_pos": SimpleNamespace(
         # matches those on the real robot
         low=np.array([-0.785, -1.396, -1.047] * dims.NumFingers.value, dtype=np.float32),
         high=np.array([0.785, 1.047, 1.396] * dims.NumFingers.value, dtype=np.float32),
-        # default=np.deg2rad([0.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
-        # rand_lolim=np.deg2rad([-20.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
-        # rand_uplim=np.deg2rad([20.0, 7.5, -10.0] * dims.NumFingers.value, dtype=np.float32),
-        default=np.array([-0.45, 0.35, -0.55, 0.0, 0.35, -0.55, 0.45, 0.35, -0.55], dtype=np.float32),
+        default=np.array([-0.45, 0.35, -0.55, 0.0, 0.35, -0.55, 0.45, 0.35, -0.551], dtype=np.float32),
         rand_lolim=np.array([-0.15, 0.35, -0.55, -0.3, 0.35, -0.55, 0.15, 0.35, -0.55], dtype=np.float32),
         rand_uplim=np.array([-0.75, 0.35, -0.55, 0.3, 0.35, -0.55, 0.75, 0.35, -0.55], dtype=np.float32),
     ),
-    "joint_velocity": SimpleNamespace(
+    "joint_vel": SimpleNamespace(
         low=np.full(dims.JointVelocityDim.value, -robot_dof_properties["max_velocity_radps"], dtype=np.float32),
         high=np.full(dims.JointVelocityDim.value, robot_dof_properties["max_velocity_radps"], dtype=np.float32),
         default=np.zeros(dims.JointVelocityDim.value, dtype=np.float32),
     ),
-    "joint_effort": SimpleNamespace(
+    "joint_eff": SimpleNamespace(
         low=np.full(dims.JointTorqueDim.value, -robot_dof_properties["max_torque_Nm"], dtype=np.float32),
         high=np.full(dims.JointTorqueDim.value, robot_dof_properties["max_torque_Nm"], dtype=np.float32),
         default=np.zeros(dims.JointTorqueDim.value, dtype=np.float32),
     ),
-    "fingertip_position": SimpleNamespace(
+    "fingertip_pos": SimpleNamespace(
         low=np.array([-0.25, -0.25, -0.25] * dims.NumFingers.value, dtype=np.float32),
         high=np.array([0.25, 0.25, 0.25] * dims.NumFingers.value, dtype=np.float32),
     ),
-    "fingertip_orientation": SimpleNamespace(
+    "fingertip_orn": SimpleNamespace(
         low=-np.ones(4 * dims.NumFingers.value, dtype=np.float32),
         high=np.ones(4 * dims.NumFingers.value, dtype=np.float32),
     ),
-    "fingertip_velocity": SimpleNamespace(
+    "fingertip_vel": SimpleNamespace(
         low=np.full(dims.VelocityDim.value, -0.25, dtype=np.float32),
         high=np.full(dims.VelocityDim.value, 0.25, dtype=np.float32),
     ),
-    "latest_action_pos": SimpleNamespace(
+    "latest_action": SimpleNamespace(
         low=np.full(dims.JointPositionDim.value, -robot_dof_properties["max_position_delta_rad"], dtype=np.float32),
         high=np.full(dims.JointPositionDim.value, robot_dof_properties["max_position_delta_rad"], dtype=np.float32),
-    ),
-    "latest_action_vel": SimpleNamespace(
-        low=np.full(dims.JointVelocityDim.value, -robot_dof_properties["max_velocity_radps"], dtype=np.float32),
-        high=np.full(dims.JointVelocityDim.value, robot_dof_properties["max_velocity_radps"], dtype=np.float32),
-    ),
-    "latest_action_eff": SimpleNamespace(
-        low=np.full(dims.JointTorqueDim.value, -robot_dof_properties["max_torque_Nm"], dtype=np.float32),
-        high=np.full(dims.JointTorqueDim.value, robot_dof_properties["max_torque_Nm"], dtype=np.float32),
     ),
     "bool_tip_contacts": SimpleNamespace(
         low=np.zeros(dims.NumFingers.value, dtype=np.float32),
@@ -157,38 +146,38 @@ robot_limits = {
 }
 
 object_limits = {
-    "position": SimpleNamespace(
+    "object_pos": SimpleNamespace(
         low=np.array([-0.2, -0.2, 0.0], dtype=np.float32),
         high=np.array([0.2, 0.2, 0.4], dtype=np.float32),
     ),
-    "orientation": SimpleNamespace(
+    "object_orn": SimpleNamespace(
         low=-np.ones(4, dtype=np.float32),
         high=np.ones(4, dtype=np.float32),
     ),
-    "keypoint_position": SimpleNamespace(
+    "object_kps": SimpleNamespace(
         low=np.array([-0.3, -0.3, 0.0] * dims.NumKeypoints.value, dtype=np.float32),
         high=np.array([0.3, 0.3, 0.5] * dims.NumKeypoints.value, dtype=np.float32),
     ),
-    "linear_velocity": SimpleNamespace(
+    "object_linvel": SimpleNamespace(
         low=np.array([-0.5, -0.5, -2.0], dtype=np.float32),
         high=np.array([0.5, 0.5, 0.2], dtype=np.float32),
     ),
-    "angular_velocity": SimpleNamespace(
+    "object_angvel": SimpleNamespace(
         low=np.full(dims.AngularVelocityDim.value, -1.0, dtype=np.float32),
         high=np.full(dims.AngularVelocityDim.value, 1.0, dtype=np.float32),
     ),
 }
 
-target_limits = {
-    "position": SimpleNamespace(
+goal_limits = {
+    "goal_pos": SimpleNamespace(
         low=np.array([-0.2, -0.2, 0.0], dtype=np.float32),
         high=np.array([0.2, 0.2, 0.4], dtype=np.float32),
     ),
-    "orientation": SimpleNamespace(
+    "goal_orn": SimpleNamespace(
         low=-np.ones(4, dtype=np.float32),
         high=np.ones(4, dtype=np.float32),
     ),
-    "keypoint_position": SimpleNamespace(
+    "goal_kps": SimpleNamespace(
         low=np.array([-0.3, -0.3, 0.0] * dims.NumKeypoints.value, dtype=np.float32),
         high=np.array([0.3, 0.3, 0.5] * dims.NumKeypoints.value, dtype=np.float32),
     ),
@@ -196,11 +185,11 @@ target_limits = {
         low=-np.ones(4, dtype=np.float32),
         high=np.ones(4, dtype=np.float32),
     ),
-    "pivot_axel_vector": SimpleNamespace(
+    "pivot_axel_vec": SimpleNamespace(
         low=np.full(dims.VecDim.value, -1.0, dtype=np.float32),
         high=np.full(dims.VecDim.value, 1.0, dtype=np.float32),
     ),
-    "pivot_axel_position": SimpleNamespace(
+    "pivot_axel_pos": SimpleNamespace(
         low=np.full(dims.PosDim.value, -0.05, dtype=np.float32),
         high=np.full(dims.PosDim.value, 0.05, dtype=np.float32),
     ),
