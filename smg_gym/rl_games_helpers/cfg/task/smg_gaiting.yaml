@@ -40,13 +40,13 @@ env:
 
   # shared reward/termination
   episode_length: 1000
-  require_contact: True
+  fall_reset_dist: 0.15
+  av_factor: 0.01
+  require_contact: False
   contact_reward_scale: 0.0
   bad_contact_penalty_scale: 1.0
   action_penalty_scale: 0.0
-  av_factor: 0.01
-  reach_goal_bonus: 50
-  fall_reset_dist: 0.15
+  reach_goal_bonus: 50.0
   fall_penalty: 0.0
 
   # reward_type: "hybrid"
@@ -63,7 +63,7 @@ env:
 
 rand_params:
   randomize: True
-  rand_hand_joints: True
+  rand_hand_joints: False
   rand_obj_init_orn: False
   rand_obj_scale: False
   rand_pivot_pos: False
@@ -71,11 +71,70 @@ rand_params:
   # rand_pivot_axel: 'cardinal'
   rand_pivot_axel: 'none'
 
+sim:
+  dt: 0.016667
+  substeps: 2
+  up_axis: "z"
+  use_gpu_pipeline: ${eq:${...pipeline},"gpu"}
+  gravity: [0.0, 0.0, -9.81]
+  # gravity: [0.0, 0.0, 0.0]
+  physx:
+    num_threads: ${....num_threads}
+    solver_type: ${....solver_type}
+    use_gpu: ${contains:"cuda",${....sim_device}}
+    num_position_iterations: 4
+    num_velocity_iterations: 0
+    max_gpu_contact_pairs: 8388608
+    contact_offset: 0.002
+    rest_offset: 0.0
+    bounce_threshold_velocity: 0.2
+    max_depenetration_velocity: 1000.0
+    default_buffer_size_multiplier: 5.0
+    contact_collection: 1
+
+
 normalize_obs: False
 asymmetric_obs: True
 
 enabled_obs:
 
+    # proprio
+    joint_pos: True
+    joint_vel: False
+    joint_eff: False
+    fingertip_pos: True
+    fingertip_orn: True
+    latest_action: True
+
+    # default contacts
+    bool_tip_contacts: True
+    net_tip_contact_forces: False
+
+    # ft sensor contacts req
+    ft_sensor_contact_forces: False
+    ft_sensor_contact_torques: False
+
+    # rich contacts req
+    tip_contact_positions: False
+    tip_contact_normals: False
+    tip_contact_force_mags: False
+
+    # privaliged object
+    object_pos: True
+    object_orn: True
+    object_kps: True
+    object_linvel: False
+    object_angvel: False
+    goal_pos: True
+    goal_orn: True
+    goal_kps: True
+    active_quat: True
+
+    # task specific conditioning
+    pivot_axel_vec: False
+    pivot_axel_pos: False
+
+enabled_states:
     # proprio
     joint_pos: True
     joint_vel: True
@@ -112,67 +171,8 @@ enabled_obs:
     pivot_axel_vec: True
     pivot_axel_pos: False
 
-enabled_states:
-    # proprio
-    joint_pos: True
-    joint_vel: True
-    joint_eff: False
-    fingertip_pos: True
-    fingertip_orn: True
-    latest_action: True
-
-    # default contacts
-    bool_tip_contacts: True
-    net_tip_contact_forces: True
-
-    # ft sensor contacts req
-    ft_sensor_contact_forces: True
-    ft_sensor_contact_torques: True
-
-    # rich contacts req
-    tip_contact_positions: False
-    tip_contact_normals: False
-    tip_contact_force_mags: False
-
-    # privaliged object
-    object_pos: True
-    object_orn: True
-    object_kps: True
-    object_linvel: True
-    object_angvel: True
-    goal_pos: True
-    goal_orn: True
-    goal_kps: True
-    active_quat: True
-
-    # task specific conditioning
-    pivot_axel_vec: True
-    pivot_axel_pos: False
-
-sim:
-  dt: 0.016667
-  substeps: 2
-  up_axis: "z"
-  use_gpu_pipeline: ${eq:${...pipeline},"gpu"}
-  gravity: [0.0, 0.0, -9.81]
-  # gravity: [0.0, 0.0, 0.0]
-  physx:
-    num_threads: ${....num_threads}
-    solver_type: ${....solver_type}
-    use_gpu: ${contains:"cuda",${....sim_device}}
-    num_position_iterations: 4
-    num_velocity_iterations: 0
-    max_gpu_contact_pairs: 8388608
-    contact_offset: 0.002
-    rest_offset: 0.0
-    bounce_threshold_velocity: 0.2
-    max_depenetration_velocity: 1000.0
-    default_buffer_size_multiplier: 5.0
-    contact_collection: 1
-
-
 domain_randomization:
-  randomize: False
+  randomize: True
   dr_params:
 
     frequency: 1000   # Define how many simulation steps between generating new randomizations

@@ -9,9 +9,11 @@ from isaacgym.torch_utils import quat_conjugate
 from isaacgym.torch_utils import quat_rotate
 from isaacgym.torch_utils import to_torch
 from isaacgym.torch_utils import torch_rand_float
+from isaacgym.torch_utils import quat_unit
 from isaacgym import gymtorch
 from isaacgym import gymapi
 from isaacgym import gymutil
+
 
 from smg_gym.tasks.base_vec_task import VecTask
 from smg_gym.utils.torch_jit_utils import randomize_rotation
@@ -446,7 +448,8 @@ class BaseShadowModularGrasper(VecTask):
         self.gym.set_asset_rigid_shape_properties(self.obj_asset, obj_props)
 
         # set initial state for the object
-        self.default_obj_pos = (0.0, -0.015, 0.25)
+        # self.default_obj_pos = (0.0, -0.015, 0.25)
+        self.default_obj_pos = (0.0, -0.016, 0.25)
         self.default_obj_orn = (0.0, 0.0, 0.0, 1.0)
         self.default_obj_linvel = (0.0, 0.0, 0.0)
         self.default_obj_angvel = (0.0, 0.0, 0.1)
@@ -965,10 +968,11 @@ class BaseShadowModularGrasper(VecTask):
 
         # object keypoints
         if buf_cfg["object_kps"]:
+            rel_kp_pos = (self.obj_kp_positions - self.obj_displacement_tensor).reshape(self.num_envs,
+                                                                                        self._dims.KeypointPosDim.value)
             start_offset = end_offset
             end_offset = start_offset + self._dims.KeypointPosDim.value
-            buf[:, start_offset:end_offset] = (self.obj_kp_positions
-                                               - self.obj_displacement_tensor).reshape(self.num_envs, self.n_keypoints*3)
+            buf[:, start_offset:end_offset] = rel_kp_pos
 
         # object linear velocity
         if buf_cfg["object_linvel"]:
@@ -996,16 +1000,18 @@ class BaseShadowModularGrasper(VecTask):
 
         # goal keypoints
         if buf_cfg["goal_kps"]:
+
+            rel_goal_pos = (self.goal_kp_positions - self.goal_displacement_tensor).reshape(self.num_envs,
+                                                                                            self._dims.KeypointPosDim.value)
             start_offset = end_offset
             end_offset = start_offset + self._dims.KeypointPosDim.value
-            buf[:, start_offset:end_offset] = (
-                self.goal_kp_positions - self.goal_displacement_tensor).reshape(self.num_envs, self._dims.KeypointPosDim.value)
+            buf[:, start_offset:end_offset] = rel_goal_pos
 
         # active quat between goal and object
         if buf_cfg["active_quat"]:
             start_offset = end_offset
             end_offset = start_offset + self._dims.OrnDim.value
-            buf[:, start_offset:end_offset] = quat_mul(self.obj_base_orn, quat_conjugate(self.goal_base_orn))
+            buf[:, start_offset:end_offset] = self.active_quat
 
         return start_offset, end_offset
 
@@ -1424,6 +1430,11 @@ class BaseShadowModularGrasper(VecTask):
         # set computed torques to simulator buffer.
         self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.target_dof_eff))
 
+    def canonicalise_quat(self, quat):
+        canon_quat = quat_unit(quat)
+        canon_quat[torch.where(canon_quat[..., 3] < 0)] *= -1
+        return canon_quat
+
     def compute_observations(self):
 
         # get which tips are in contact
@@ -1445,8 +1456,8 @@ class BaseShadowModularGrasper(VecTask):
         # get tcp positions
         fingertip_states = self.rigid_body_tensor[:, self.fingertip_tcp_body_idxs, :]
         self.fingertip_pos = fingertip_states[..., 0:3].reshape(self.num_envs, 9)
-        self.fingertip_orn = fingertip_states[..., 3:7]
-        self.fingertip_orn[torch.where(self.fingertip_orn[..., 3] < 0)] *= -1  # canonicalise
+        self.fingertip_orn = self.canonicalise_quat(fingertip_states[..., 3:7])
+        # self.fingertip_orn[torch.where(self.fingertip_orn[..., 3] < 0)] *= -1  # canonicalise
         self.fingertip_linvel = fingertip_states[..., 7:10]
         self.fingertip_angvel = fingertip_states[..., 10:13]
 
@@ -1460,13 +1471,16 @@ class BaseShadowModularGrasper(VecTask):
 
         # get object pose / vel
         self.obj_base_pos = self.root_state_tensor[self.obj_indices, 0:3]
-        self.obj_base_orn = self.root_state_tensor[self.obj_indices, 3:7]
+        self.obj_base_orn = self.canonicalise_quat(self.root_state_tensor[self.obj_indices, 3:7])
         self.obj_base_linvel = self.root_state_tensor[self.obj_indices, 7:10]
         self.obj_base_angvel = self.root_state_tensor[self.obj_indices, 10:13]
 
         # get goal pose
         self.goal_base_pos = self.root_state_tensor[self.goal_indices, 0:3]
-        self.goal_base_orn = self.root_state_tensor[self.goal_indices, 3:7]
+        self.goal_base_orn = self.canonicalise_quat(self.root_state_tensor[self.goal_indices, 3:7])
+
+        # relative goal pose w.r.t. obj pose
+        self.active_quat = self.canonicalise_quat(quat_mul(self.obj_base_orn, quat_conjugate(self.goal_base_orn)))
 
         # update the current keypoint positions
         for i in range(self.n_keypoints):

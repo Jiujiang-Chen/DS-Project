@@ -739,7 +739,7 @@
   <joint name="pivot_point_joint" type="fixed">
     <parent link="SMG_base_link"/>
     <child link="pivot_point_link"/>
-    <origin rpy="0.0 0.0 0.0" xyz="0.0 0.0 0.25"/>
+    <origin rpy="0.0 0.0 0.0" xyz="0.0 -0.016 0.25"/>
   </joint>
 
 
