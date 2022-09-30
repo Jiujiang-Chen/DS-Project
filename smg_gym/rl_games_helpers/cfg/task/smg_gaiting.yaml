@@ -17,17 +17,17 @@ env:
   # env settings
   obj_name: 'sphere'
   # obj_name: 'box'
+  # obj_name: 'capsule'
   # obj_name: 'rand'
 
-  rotateIncrementDegrees: 60
+  rotateIncrementDegrees: 30
   default_pivot_axel: [0.0, 0.0, 1.0]
   clip_observations: 5.0
   clip_actions: 1.0
 
   enable_dof_force_sensors: False
-
-  # contact_sensor_modality: 'default'
-  contact_sensor_modality: 'ft_sensor'
+  contact_sensor_modality: 'default'
+  # contact_sensor_modality: 'ft_sensor'
   # contact_sensor_modality: 'rich_cpu'
 
   # action settings
@@ -39,14 +39,14 @@ env:
   # command_mode: 'torque'
 
   # shared reward/termination
-  episode_length: 1000
-  fall_reset_dist: 0.15
+  episode_length: 200
+  # fall_reset_dist: 0.15
   av_factor: 0.01
   require_contact: False
   contact_reward_scale: 0.0
-  bad_contact_penalty_scale: 1.0
+  # bad_contact_penalty_scale: 0.1
   action_penalty_scale: 0.0
-  reach_goal_bonus: 50.0
+  reach_goal_bonus: 10.0
   fall_penalty: 0.0
 
   # reward_type: "hybrid"
@@ -56,14 +56,30 @@ env:
   rot_eps: 0.1
 
   reward_type: "keypoint"
+  bad_contact_penalty_scale: 0.1
+  fall_reset_dist: 0.05
   kp_success_tolerance: 0.015
   lgsk_scale: 50.0
   lgsk_eps: 2.0
-  kp_dist_scale: 10.0
+  kp_dist_scale: 1.0
+  hand_pose_penalty_scale: 0.1
+  obj_linvel_penalty_scale: 0.0
+
+  # reward_type: "angvel"
+  # bad_contact_penalty_scale: 0.25
+  # fall_reset_dist: 0.05
+  angvel_clip_min: -0.5
+  angvel_clip_max: 0.5
+  lambda_angvel: 1.0
+  lambda_pose: 0.3
+  lambda_torque: 0.1
+  lambda_work: 2.0
+  lambda_linvel: 0.3
+
 
 rand_params:
   randomize: True
-  rand_hand_joints: False
+  rand_hand_joints: True
   rand_obj_init_orn: False
   rand_obj_scale: False
   rand_pivot_pos: False
@@ -73,7 +89,8 @@ rand_params:
 
 sim:
   dt: 0.016667
-  substeps: 2
+  # dt: 0.008333
+  substeps: 1
   up_axis: "z"
   use_gpu_pipeline: ${eq:${...pipeline},"gpu"}
   gravity: [0.0, 0.0, -9.81]
@@ -94,7 +111,7 @@ sim:
 
 
 normalize_obs: False
-asymmetric_obs: True
+asymmetric_obs: False
 
 enabled_obs:
 
@@ -105,10 +122,11 @@ enabled_obs:
     fingertip_pos: True
     fingertip_orn: True
     latest_action: True
+    target_joint_pos: True
 
     # default contacts
     bool_tip_contacts: True
-    net_tip_contact_forces: False
+    net_tip_contact_forces: True
 
     # ft sensor contacts req
     ft_sensor_contact_forces: False
@@ -125,7 +143,7 @@ enabled_obs:
     object_kps: True
     object_linvel: False
     object_angvel: False
-    goal_pos: True
+    goal_pos: False
     goal_orn: True
     goal_kps: True
     active_quat: True
@@ -138,17 +156,18 @@ enabled_states:
     # proprio
     joint_pos: True
     joint_vel: True
-    joint_eff: False
+    joint_eff: True
     fingertip_pos: True
     fingertip_orn: True
     latest_action: True
+    target_joint_pos: True
 
     # default contacts
     bool_tip_contacts: True
     net_tip_contact_forces: True
 
     # ft sensor contacts req
-    ft_sensor_contact_forces: True
+    ft_sensor_contact_forces: False
     ft_sensor_contact_torques: False
 
     # rich contacts req
@@ -169,10 +188,10 @@ enabled_states:
 
     # task specific conditioning
     pivot_axel_vec: True
-    pivot_axel_pos: False
+    pivot_axel_pos: True
 
 domain_randomization:
-  randomize: True
+  randomize: False
   dr_params:
 
     frequency: 1000   # Define how many simulation steps between generating new randomizations
@@ -249,7 +268,7 @@ domain_randomization:
             # schedule_steps: 30000
 
       object:
-        # color: True
+        color: False
 
         rigid_body_properties:
           mass:

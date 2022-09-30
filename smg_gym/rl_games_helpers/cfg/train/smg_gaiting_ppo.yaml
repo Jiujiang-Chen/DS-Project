@@ -59,7 +59,7 @@ params:
     schedule_type: standard
     kl_threshold: 0.016
     score_to_win: 100000
-    max_epochs: ${resolve_default:5000,${....max_iterations}}
+    max_epochs: ${resolve_default:400,${....max_iterations}}
     use_diagnostics: True
     save_best_after: 100
     save_frequency: 250
