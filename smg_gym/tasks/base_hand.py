@@ -245,9 +245,10 @@ class BaseShadowModularGrasper(VecTask):
         self._observations_scale.low = torch.cat(obs_scale_low)
         self._observations_scale.high = torch.cat(obs_scale_high)
 
-        state_scale_low, state_scale_high = get_scale_limits(self.cfg["enabled_states"])
-        self._states_scale.low = torch.cat(state_scale_low)
-        self._states_scale.high = torch.cat(state_scale_high)
+        if self.cfg["asymmetric_obs"]:
+            state_scale_low, state_scale_high = get_scale_limits(self.cfg["enabled_states"])
+            self._states_scale.low = torch.cat(state_scale_low)
+            self._states_scale.high = torch.cat(state_scale_high)
 
         # check that dimensions match observations
         if self._observations_scale.low.shape[0] != self.num_obs or self._observations_scale.high.shape[0] != self.num_obs:
@@ -257,12 +258,13 @@ class BaseShadowModularGrasper(VecTask):
                   f"\tExpected: {self.num_obs}."
             raise AssertionError(msg)
 
-        if self._states_scale.low.shape[0] != self.num_states or self._states_scale.high.shape[0] != self.num_states:
-            msg = f"States scaling dimensions mismatch. " \
-                  f"\tLow: {self._states_scale.low.shape[0]}, " \
-                  f"\tHigh: {self._states_scale.high.shape[0]}, " \
-                  f"\tExpected: {self.num_states}."
-            raise AssertionError(msg)
+        if self.cfg["asymmetric_obs"]:
+            if self._states_scale.low.shape[0] != self.num_states or self._states_scale.high.shape[0] != self.num_states:
+                msg = f"States scaling dimensions mismatch. " \
+                      f"\tLow: {self._states_scale.low.shape[0]}, " \
+                      f"\tHigh: {self._states_scale.high.shape[0]}, " \
+                      f"\tExpected: {self.num_states}."
+                raise AssertionError(msg)
 
     def initialize_state_history_buffers(self):
         for _ in range(self._state_history_len):
@@ -317,7 +319,7 @@ class BaseShadowModularGrasper(VecTask):
 
     def _setup_hand(self):
 
-        asset_root = add_assets_path("robot_assets/smg_minitip_v2")
+        asset_root = add_assets_path("robot_assets/smg_minitip_4_fingers")
         asset_file = "smg_tactip.urdf"
         # asset_file = "smg_tactip_with_tip_targets.urdf"
 
@@ -341,24 +343,24 @@ class BaseShadowModularGrasper(VecTask):
         # set default hand link properties
         hand_props = self.gym.get_asset_rigid_shape_properties(self.hand_asset)
         for p in hand_props:
-            p.friction = 0.01
-            p.torsion_friction = 0.01
+            p.friction = 2000.0
+            p.torsion_friction = 1000.0
+            p.rolling_friction = 0.0
             p.restitution = 0.0
-            # p.rolling_friction = 0.1
             # p.thickness = 0.001
 
-        # TODO: remove hardcoded tip indices (be careful of merged fixed links)
-        # set the tip dynamics
-        tip_shape_indices = [7, 14, 21]
-        # tip_shape_indices = [8, 16, 24]
-        for idx in tip_shape_indices:
-            p = hand_props[idx]
-            p.friction = 2.0
-            p.torsion_friction = 1.0
-            p.restitution = 0.0
-            # p.rolling_friction = 0.1
-            # p.thickness = 0.001
-        self.gym.set_asset_rigid_shape_properties(self.hand_asset, hand_props)
+        # # TODO: remove hardcoded tip indices (be careful of merged fixed links)
+        # # set the tip dynamics
+        # tip_shape_indices = [7, 14, 21, 28]
+        # # tip_shape_indices = [8, 16, 24, 32]
+        # for idx in tip_shape_indices:
+        #     p = hand_props[idx]
+        #     p.friction = 2.0
+        #     p.torsion_friction = 1.0
+        #     p.rolling_friction = 0.0
+        #     p.restitution = 0.0
+        #     # p.thickness = 0.001
+        # self.gym.set_asset_rigid_shape_properties(self.hand_asset, hand_props)
 
         self.control_joint_dof_indices = [
             self.gym.find_asset_dof_index(self.hand_asset, name) for name in self._control_joint_names
@@ -375,10 +377,15 @@ class BaseShadowModularGrasper(VecTask):
         self.target_dof_vel = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
         self.target_dof_eff = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
 
+        # init tensor for reference
+        self.init_dof_pos = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
+        self.init_dof_vel = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
+        self.init_dof_eff = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
+
     def _choose_env_object(self):
 
         if self.obj_name == 'rand':
-            self.env_obj_choice = np.random.choice(['sphere', 'box'])
+            self.env_obj_choice = np.random.choice(['sphere', 'box', 'capsule'])
         else:
             self.env_obj_choice = self.obj_name
 
@@ -402,8 +409,23 @@ class BaseShadowModularGrasper(VecTask):
             else:
                 self.box_size = self._object_properties[self.env_obj_choice]['size']
 
+        elif self.env_obj_choice == 'capsule':
+            self.env_obj_color = gymapi.Vec3(0, 1, 0)
+            if self.rand_obj_scale:
+                self.capsule_radius = np.random.uniform(
+                    self._object_properties[self.env_obj_choice]['radius_llim'],
+                    self._object_properties[self.env_obj_choice]['radius_ulim']
+                )
+                self.capsule_width = np.random.uniform(
+                    self._object_properties[self.env_obj_choice]['width_llim'],
+                    self._object_properties[self.env_obj_choice]['width_ulim']
+                )
+            else:
+                self.capsule_radius = self._object_properties[self.env_obj_choice]['radius']
+                self.capsule_width = self._object_properties[self.env_obj_choice]['width']
+
         else:
-            msg = f"Invalid object specified. Input: {self.obj_name} not in ['sphere', 'box', 'rand']."
+            msg = f"Invalid object specified. Input: {self.obj_name} not in ['sphere', 'box', 'rand', 'capsule']."
             raise ValueError(msg)
 
     def _setup_obj(self):
@@ -436,21 +458,34 @@ class BaseShadowModularGrasper(VecTask):
                 self.box_size[2],
                 asset_options
             )
+        elif self.env_obj_choice == 'capsule':
+            self.obj_asset = self.gym.create_capsule(
+                self.sim,
+                self.capsule_radius,
+                self.capsule_width,
+                asset_options
+            )
 
         # set object properties
         obj_props = self.gym.get_asset_rigid_shape_properties(self.obj_asset)
         for p in obj_props:
-            p.friction = 2.0
-            p.torsion_friction = 1.0
+            p.friction = 2000.0
+            p.torsion_friction = 1000.0
+            p.rolling_friction = 0.0
             p.restitution = 0.0
-            # p.rolling_friction = 0.0
             # p.thickness = 0.001
         self.gym.set_asset_rigid_shape_properties(self.obj_asset, obj_props)
 
         # set initial state for the object
-        # self.default_obj_pos = (0.0, -0.015, 0.25)
-        self.default_obj_pos = (0.0, -0.016, 0.25)
-        self.default_obj_orn = (0.0, 0.0, 0.0, 1.0)
+        # self.default_obj_pos = (0.0, -0.016, 0.25)
+        # self.default_obj_pos = (0.0, -0.0, 0.245)
+        self.default_obj_pos = (0.0, -0.0, 0.235)
+
+        if self.obj_name == 'capsule':
+            self.default_obj_orn = (np.sqrt(0.5), 0.0, np.sqrt(0.5), 0.0)
+        else:
+            self.default_obj_orn = (0.0, 0.0, 0.0, 1.0)
+
         self.default_obj_linvel = (0.0, 0.0, 0.0)
         self.default_obj_angvel = (0.0, 0.0, 0.1)
         self.obj_displacement_tensor = to_torch(self.default_obj_pos, dtype=torch.float, device=self.device)
@@ -480,10 +515,22 @@ class BaseShadowModularGrasper(VecTask):
                 self.box_size[2],
                 asset_options
             )
+        elif self.env_obj_choice == 'capsule':
+            self.goal_asset = self.gym.create_capsule(
+                self.sim,
+                self.capsule_radius,
+                self.capsule_width,
+                asset_options
+            )
 
         # set initial state of goal
         self.default_goal_pos = (-0.2, -0.06, 0.4)
-        self.default_goal_orn = (0.0, 0.0, 0.0, 1.0)
+
+        if self.obj_name == 'capsule':
+            self.default_goal_orn = (np.sqrt(0.5), 0.0, np.sqrt(0.5), 0.0)
+        else:
+            self.default_goal_orn = (0.0, 0.0, 0.0, 1.0)
+
         self.goal_displacement_tensor = to_torch(self.default_goal_pos, dtype=torch.float, device=self.device)
 
     def _setup_keypoints(self):
@@ -700,7 +747,7 @@ class BaseShadowModularGrasper(VecTask):
         self.non_tip_body_idxs = [
             self.gym.find_asset_rigid_body_index(self.hand_asset, name) for name in non_tip_body_names
         ]
-        self.n_tips = 3
+        self.n_tips = self._dims.NumFingers.value
         self.n_non_tip_links = len(self.non_tip_body_idxs)
 
         # add ft sensors to fingertips
@@ -906,6 +953,12 @@ class BaseShadowModularGrasper(VecTask):
             end_offset = start_offset + self._dims.ActionDim.value
             buf[:, start_offset:end_offset] = self.action_buf
 
+        # target joint position
+        if buf_cfg["target_joint_pos"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.JointPositionDim.value
+            buf[:, start_offset:end_offset] = self.target_dof_pos
+
         # boolean tips in contacts
         if buf_cfg["bool_tip_contacts"]:
             start_offset = end_offset
@@ -1034,6 +1087,8 @@ class BaseShadowModularGrasper(VecTask):
             buf_size += self._dims.FingertipOrnDim.value
         if buf_cfg["latest_action"]:
             buf_size += self._dims.ActionDim.value
+        if buf_cfg["target_joint_pos"]:
+            buf_size += self._dims.JointPositionDim.value
         if buf_cfg["bool_tip_contacts"]:
             buf_size += self._dims.NumFingers.value
         if buf_cfg["net_tip_contact_forces"]:
@@ -1124,6 +1179,10 @@ class BaseShadowModularGrasper(VecTask):
         self.target_dof_pos[env_ids_for_reset, :self.n_hand_dofs] = target_dof_pos
         self.target_dof_vel[env_ids_for_reset, :self.n_hand_dofs] = target_dof_vel
         self.target_dof_eff[env_ids_for_reset, :self.n_hand_dofs] = target_dof_eff
+
+        self.init_dof_pos[env_ids_for_reset, :self.n_hand_dofs] = target_dof_pos
+        self.init_dof_vel[env_ids_for_reset, :self.n_hand_dofs] = target_dof_vel
+        self.init_dof_eff[env_ids_for_reset, :self.n_hand_dofs] = target_dof_eff
 
         # reset robot fingertips state history
         for idx in range(1, self._state_history_len):
@@ -1455,7 +1514,7 @@ class BaseShadowModularGrasper(VecTask):
 
         # get tcp positions
         fingertip_states = self.rigid_body_tensor[:, self.fingertip_tcp_body_idxs, :]
-        self.fingertip_pos = fingertip_states[..., 0:3].reshape(self.num_envs, 9)
+        self.fingertip_pos = fingertip_states[..., 0:3].reshape(self.num_envs, self._dims.FingertipPosDim.value)
         self.fingertip_orn = self.canonicalise_quat(fingertip_states[..., 3:7])
         # self.fingertip_orn[torch.where(self.fingertip_orn[..., 3] < 0)] *= -1  # canonicalise
         self.fingertip_linvel = fingertip_states[..., 7:10]

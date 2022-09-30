@@ -104,12 +104,18 @@ def compute_keypoint_reorient_reward(
     consecutive_successes: torch.Tensor,
     obj_kps: torch.Tensor,
     goal_kps: torch.Tensor,
+    obj_linvel: torch.Tensor,
+    obj_angvel: torch.Tensor,
     actions: torch.Tensor,
     n_tip_contacts: torch.Tensor,
     n_non_tip_contacts: torch.Tensor,
+    current_joint_pos: torch.Tensor,
+    init_joint_pos: torch.Tensor,
     lgsk_scale: float,
     lgsk_eps: float,
     kp_dist_scale: float,
+    hand_pose_penalty_scale: float,
+    obj_linvel_penalty_scale: float,
     success_tolerance: float,
     max_episode_length: float,
     fall_reset_dist: float,
@@ -134,11 +140,17 @@ def compute_keypoint_reorient_reward(
     # add penalty for large actions
     action_penalty = -torch.sum(actions**2, dim=-1) * action_penalty_scale
 
+    # add penalty for large actions
+    hand_pose_penalty = -hand_pose_penalty_scale * torch.norm(current_joint_pos - init_joint_pos, p=2, dim=-1)
+
+    # add penalty for linear velocity of obj
+    obj_linvel_penalty = -obj_linvel_penalty_scale * torch.norm(obj_linvel, p=2, dim=-1)
+
     # Total reward is: position distance + orientation alignment + action regularization + success bonus + fall penalty
-    total_reward = kp_dist_rew + action_penalty
+    total_reward = kp_dist_rew + action_penalty + hand_pose_penalty + obj_linvel_penalty
 
     # add reward for maintaining tips in contact
-    total_reward = torch.where(n_tip_contacts < 2, total_reward, total_reward + contact_reward_scale)
+    total_reward = torch.where(n_tip_contacts <= 2, total_reward, total_reward + contact_reward_scale)
 
     # add penalty for contacting with links other than the tips
     total_reward = torch.where(n_non_tip_contacts > 0, total_reward - bad_contact_penalty_scale, total_reward)
@@ -178,6 +190,8 @@ def compute_keypoint_reorient_reward(
         'num_tip_contacts': n_tip_contacts,
         'num_non_tip_contacts': n_non_tip_contacts,
         'total_reward': total_reward,
+        'penalty_hand_pose': hand_pose_penalty,
+        'penalty_obj_linvel': obj_linvel_penalty,
     }
 
     return total_reward, resets, goal_resets, successes, cons_successes, info

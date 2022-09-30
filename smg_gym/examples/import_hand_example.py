@@ -82,7 +82,7 @@ env_upper = gymapi.Vec3(spacing, spacing, spacing)
 
 def load_hand():
 
-    asset_root = add_assets_path('robot_assets/smg_minitip_v2')
+    asset_root = add_assets_path('robot_assets/smg_minitip_4_fingers')
     asset_file = "smg_tactip.urdf"
 
     asset_options = gymapi.AssetOptions()
@@ -126,20 +126,23 @@ def load_objects():
 control_joint_names = [
     "SMG_F1J1", "SMG_F1J2", "SMG_F1J3",
     "SMG_F2J1", "SMG_F2J2", "SMG_F2J3",
-    "SMG_F3J1", "SMG_F3J2", "SMG_F3J3"
+    "SMG_F3J1", "SMG_F3J2", "SMG_F3J3",
+    "SMG_F4J1", "SMG_F4J2", "SMG_F4J3",
 ]
 
 num_control_dofs = len(control_joint_names)
 
 mins = {
     "J1": -20.0*(np.pi/180),
-    "J2": -25.0*(np.pi/180),
+    "J2": -20.0*(np.pi/180),
     "J3": -20.0*(np.pi/180),
+    "J4": -20.0*(np.pi/180),
 }
 maxs = {
     "J1": 20.0*(np.pi/180),
-    "J2": -15.0*(np.pi/180),
+    "J2": 20.0*(np.pi/180),
     "J3": 20.0*(np.pi/180),
+    "J4": 20.0*(np.pi/180),
 }
 
 
@@ -271,6 +274,7 @@ def apply_grasp_action(current_joint_states):
     dt = sim_params.dt
 
     grasp_action = np.array([
+        0.0, act_lim, 0.0,
         0.0, act_lim, 0.0,
         0.0, act_lim, 0.0,
         0.0, act_lim, 0.0

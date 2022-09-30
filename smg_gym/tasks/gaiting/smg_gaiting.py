@@ -63,7 +63,7 @@ class SMGGaiting(BaseGaiting):
         if cfg["asymmetric_obs"]:
             cfg["env"]["numStates"] = self.calculate_buffer_size(cfg["enabled_states"])
 
-        cfg["env"]["numActions"] = 9
+        cfg["env"]["numActions"] = self._dims.ActionDim.value
 
         super(SMGGaiting, self).__init__(
             cfg,

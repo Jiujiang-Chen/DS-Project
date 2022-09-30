@@ -13,6 +13,7 @@ from isaacgym.torch_utils import quat_from_angle_axis
 from smg_gym.tasks.base_hand import BaseShadowModularGrasper
 from smg_gym.tasks.reorient.rewards import compute_keypoint_reorient_reward
 from smg_gym.tasks.reorient.rewards import compute_hybrid_reorient_reward
+from smg_gym.tasks.gaiting.rewards import compute_rma_angvel_reward
 
 
 class BaseGaiting(BaseShadowModularGrasper):
@@ -33,7 +34,7 @@ class BaseGaiting(BaseShadowModularGrasper):
         self.reward_type = cfg["env"]["reward_type"]
         self.max_episode_length = cfg["env"]["episode_length"]
 
-        if self.reward_type not in ["hybrid", "keypoint"]:
+        if self.reward_type not in ["hybrid", "keypoint", "angvel"]:
             raise ValueError('Incorrect reward mode specified.')
 
         # task specific randomisation params
@@ -281,12 +282,18 @@ class BaseGaiting(BaseShadowModularGrasper):
                 consecutive_successes=self.consecutive_successes,
                 obj_kps=centered_obj_kp_pos,
                 goal_kps=centered_goal_kp_pos,
+                obj_linvel=self.obj_base_linvel,
+                obj_angvel=self.obj_base_angvel,
                 actions=self.action_buf,
                 n_tip_contacts=self.n_tip_contacts,
                 n_non_tip_contacts=self.n_non_tip_contacts,
+                current_joint_pos=self.hand_joint_pos,
+                init_joint_pos=self._robot_limits["joint_pos"].default,
                 lgsk_scale=self.cfg["env"]["lgsk_scale"],
                 lgsk_eps=self.cfg["env"]["lgsk_eps"],
                 kp_dist_scale=self.cfg["env"]["kp_dist_scale"],
+                hand_pose_penalty_scale=self.cfg["env"]["hand_pose_penalty_scale"],
+                obj_linvel_penalty_scale=self.cfg["env"]["obj_linvel_penalty_scale"],
                 success_tolerance=self.cfg["env"]["kp_success_tolerance"],
                 max_episode_length=self.cfg["env"]["episode_length"],
                 fall_reset_dist=self.cfg["env"]["fall_reset_dist"],
@@ -296,6 +303,54 @@ class BaseGaiting(BaseShadowModularGrasper):
                 action_penalty_scale=self.cfg["env"]["action_penalty_scale"],
                 reach_goal_bonus=self.cfg["env"]["reach_goal_bonus"],
                 fall_penalty=self.cfg["env"]["fall_penalty"],
+                av_factor=self.cfg["env"]["av_factor"],
+            )
+
+        # rapid motor adaption angvel reward
+        elif self.reward_type == 'angvel':
+            (
+                self.rew_buf[:],
+                self.reset_buf[:],
+                self.reset_goal_buf[:],
+                self.successes[:],
+                self.consecutive_successes[:],
+                log_dict
+            ) = compute_rma_angvel_reward(
+                rew_buf=self.rew_buf,
+                reset_buf=self.reset_buf,
+                progress_buf=self.progress_buf,
+                reset_goal_buf=self.reset_goal_buf,
+                successes=self.successes,
+                consecutive_successes=self.consecutive_successes,
+
+                obj_kps=centered_obj_kp_pos,
+                goal_kps=centered_goal_kp_pos,
+                actions=self.action_buf,
+                n_tip_contacts=self.n_tip_contacts,
+                n_non_tip_contacts=self.n_non_tip_contacts,
+
+                object_angvel=self.obj_base_angvel,
+                target_pivot_axel=self.pivot_axel_worldframe,
+
+                current_joint_pos=self.hand_joint_pos,
+                # init_joint_pos=self.init_dof_pos,
+                init_joint_pos=self._robot_limits["joint_pos"].default,
+
+                angvel_clip_min=self.cfg["env"]["angvel_clip_min"],
+                angvel_clip_max=self.cfg["env"]["angvel_clip_max"],
+                lambda_angvel=self.cfg["env"]["lambda_angvel"],
+                lambda_pose=self.cfg["env"]["lambda_pose"],
+                lambda_torque=self.cfg["env"]["lambda_torque"],
+                lambda_work=self.cfg["env"]["lambda_work"],
+                lambda_linvel=self.cfg["env"]["lambda_linvel"],
+
+                success_tolerance=self.cfg["env"]["kp_success_tolerance"],
+                max_episode_length=self.cfg["env"]["episode_length"],
+                fall_reset_dist=self.cfg["env"]["fall_reset_dist"],
+                require_contact=self.cfg["env"]["require_contact"],
+                contact_reward_scale=self.cfg["env"]["contact_reward_scale"],
+                bad_contact_penalty_scale=self.cfg["env"]["bad_contact_penalty_scale"],
+
                 av_factor=self.cfg["env"]["av_factor"],
             )
 

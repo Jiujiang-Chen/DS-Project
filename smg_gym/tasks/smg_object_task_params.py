@@ -24,17 +24,18 @@ class SMGObjectTaskDimensions(enum.Enum):
     WrenchDim = ForceDim + TorqueDim
 
     # number of fingers
-    NumFingers = 3
+    NumFingers = 4
     FingertipPosDim = PosDim * NumFingers
     FingertipOrnDim = OrnDim * NumFingers
     FingerContactForceDim = ForceDim * NumFingers
     FingerContactTorqueDim = TorqueDim * NumFingers
 
     # for three fingers
-    ActionDim = 9
-    JointPositionDim = 9
-    JointVelocityDim = 9
-    JointTorqueDim = 9
+    NumJointsPerFinger = 3
+    ActionDim = NumJointsPerFinger * NumFingers
+    JointPositionDim = NumJointsPerFinger * NumFingers
+    JointVelocityDim = NumJointsPerFinger * NumFingers
+    JointTorqueDim = NumJointsPerFinger * NumFingers
 
     # for object
     NumKeypoints = 6
@@ -57,6 +58,14 @@ object_properties = {
         "size_llims": [0.06, 0.06, 0.06],
         "size_ulims": [0.08, 0.08, 0.08],
     },
+    "capsule": {
+        "radius": 0.035,
+        "radius_llim": 0.03,
+        "radius_ulim": 0.04,
+        "width": 0.03,
+        "width_llim": 0.025,
+        "width_ulim": 0.035,
+    },
 }
 
 robot_dof_properties = {
@@ -77,6 +86,7 @@ control_joint_names = [
     "SMG_F1J1", "SMG_F1J2", "SMG_F1J3",
     "SMG_F2J1", "SMG_F2J2", "SMG_F2J3",
     "SMG_F3J1", "SMG_F3J2", "SMG_F3J3",
+    "SMG_F4J1", "SMG_F4J2", "SMG_F4J3",
 ]
 
 # limits of the robot (mapped later: str -> torch.tensor)
@@ -85,9 +95,9 @@ robot_limits = {
         # matches those on the real robot
         low=np.array([-0.785, -1.396, -1.047] * dims.NumFingers.value, dtype=np.float32),
         high=np.array([0.785, 1.047, 1.396] * dims.NumFingers.value, dtype=np.float32),
-        default=np.array([-0.45, 0.35, -0.55, 0.0, 0.35, -0.55, 0.45, 0.35, -0.551], dtype=np.float32),
-        rand_lolim=np.array([-0.15, 0.35, -0.55, -0.3, 0.35, -0.55, 0.15, 0.35, -0.55], dtype=np.float32),
-        rand_uplim=np.array([-0.75, 0.35, -0.55, 0.3, 0.35, -0.55, 0.75, 0.35, -0.55], dtype=np.float32),
+        default=np.array([-0.0, 0.45, -0.55] * dims.NumFingers.value, dtype=np.float32),
+        rand_lolim=np.array([-0.3, 0.45, -0.55] * dims.NumFingers.value, dtype=np.float32),
+        rand_uplim=np.array([0.3, 0.45, -0.55] * dims.NumFingers.value, dtype=np.float32),
     ),
     "joint_vel": SimpleNamespace(
         low=np.full(dims.JointVelocityDim.value, -robot_dof_properties["max_velocity_radps"], dtype=np.float32),
@@ -114,6 +124,10 @@ robot_limits = {
     "latest_action": SimpleNamespace(
         low=np.full(dims.JointPositionDim.value, -robot_dof_properties["max_position_delta_rad"], dtype=np.float32),
         high=np.full(dims.JointPositionDim.value, robot_dof_properties["max_position_delta_rad"], dtype=np.float32),
+    ),
+    "target_joint_pos": SimpleNamespace(
+        low=np.array([-0.785, -1.396, -1.047] * dims.NumFingers.value, dtype=np.float32),
+        high=np.array([0.785, 1.047, 1.396] * dims.NumFingers.value, dtype=np.float32),
     ),
     "bool_tip_contacts": SimpleNamespace(
         low=np.zeros(dims.NumFingers.value, dtype=np.float32),
