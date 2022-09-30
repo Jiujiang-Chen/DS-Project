@@ -319,7 +319,7 @@ class BaseShadowModularGrasper(VecTask):
 
     def _setup_hand(self):
 
-        asset_root = add_assets_path("robot_assets/smg_minitip_4_fingers")
+        asset_root = add_assets_path("robot_assets/smg_minitip")
         asset_file = "smg_tactip.urdf"
         # asset_file = "smg_tactip_with_tip_targets.urdf"
 

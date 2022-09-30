@@ -24,7 +24,7 @@ class SMGObjectTaskDimensions(enum.Enum):
     WrenchDim = ForceDim + TorqueDim
 
     # number of fingers
-    NumFingers = 4
+    NumFingers = 3
     FingertipPosDim = PosDim * NumFingers
     FingertipOrnDim = OrnDim * NumFingers
     FingerContactForceDim = ForceDim * NumFingers

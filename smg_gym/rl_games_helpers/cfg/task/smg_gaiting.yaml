@@ -84,8 +84,8 @@ rand_params:
   rand_obj_scale: False
   rand_pivot_pos: False
   # rand_pivot_axel: 'full_rand'
-  # rand_pivot_axel: 'cardinal'
-  rand_pivot_axel: 'none'
+  rand_pivot_axel: 'cardinal'
+  # rand_pivot_axel: 'none'
 
 sim:
   dt: 0.016667
