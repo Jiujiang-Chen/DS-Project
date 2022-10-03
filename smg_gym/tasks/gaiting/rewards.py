@@ -36,17 +36,21 @@ def compute_gaiting_reward(
     lamda_good_contact: float,
     lamda_bad_contact: float,
 
-    # smoothness rewards
+    # hand smoothness rewards
     actions: torch.Tensor,
     current_joint_pos: torch.Tensor,
     current_joint_vel: torch.Tensor,
     current_joint_eff: torch.Tensor,
     init_joint_pos: torch.Tensor,
-    obj_linvel: torch.Tensor,
     lambda_pose_penalty: float,
     lambda_torque_penalty: float,
     lambda_work_penalty: float,
     lambda_linvel_penalty: float,
+
+    # obj smoothness reward
+    obj_linvel: torch.Tensor,
+    current_pivot_axel: torch.Tensor,
+    lambda_axis_cos_dist: float,
 
     # hybrid reward
     obj_base_pos: torch.Tensor,
@@ -91,18 +95,22 @@ def compute_gaiting_reward(
     obj_angvel_about_axis = torch.sum(obj_angvel * target_pivot_axel, dim=1)
     av_rew = torch.clamp(obj_angvel_about_axis, min=av_clip_min, max=av_clip_max)
 
-    # SMOOTHNESS
+    # HAND SMOOTHNESS
     # Penalty for deviating from the original grasp pose by too much
     hand_pose_penalty = -torch.norm(current_joint_pos - init_joint_pos, p=2, dim=-1)
-
     # Penalty for high torque
     torque_penalty = -torch.norm(current_joint_eff, p=2, dim=-1)
-
     # Penalty for high work
     work_penalty = -torch.sum(torch.abs(current_joint_eff * current_joint_vel), dim=-1)
 
+    # OBJECT SMOOTHNESS
     # Penalty for object linear velocity
     obj_linvel_penalty = -torch.norm(obj_linvel, p=2, dim=-1)
+    # Penalty for axis deviation
+    axis_cos_dist = 1.0 - torch.nn.functional.cosine_similarity(target_pivot_axel, current_pivot_axel, dim=1, eps=1e-12)
+    print(target_pivot_axel)
+    print(current_pivot_axel)
+    print(axis_cos_dist)
 
     # Total reward is: position distance + orientation alignment + action regularization + success bonus + fall penalty
     total_reward = \
@@ -113,7 +121,8 @@ def compute_gaiting_reward(
         lambda_pose_penalty * hand_pose_penalty + \
         lambda_torque_penalty * torque_penalty + \
         lambda_work_penalty * work_penalty + \
-        lambda_linvel_penalty * obj_linvel_penalty
+        lambda_linvel_penalty * obj_linvel_penalty + \
+        lambda_axis_cos_dist * axis_cos_dist
 
     # PRECISION GRASP
     # add reward for contacting with tips
@@ -167,7 +176,9 @@ def compute_gaiting_reward(
         'penalty_hand_pose': hand_pose_penalty,
         'penalty_hand_torque': torque_penalty,
         'penalty_hand_work': work_penalty,
+
         'penalty_obj_linvel': obj_linvel_penalty,
+        'penalty_axis_cos_dist': axis_cos_dist,
     }
 
     return total_reward, resets, goal_resets, successes, cons_successes, info

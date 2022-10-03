@@ -255,17 +255,21 @@ class BaseGaiting(BaseShadowModularGrasper):
             lamda_good_contact=self.cfg["env"]["lamda_good_contact"],
             lamda_bad_contact=self.cfg["env"]["lamda_bad_contact"],
 
-            # smoothness rewards
+            # hand smoothness rewards
             actions=self.action_buf,
             current_joint_pos=self.hand_joint_pos,
             current_joint_vel=self.hand_joint_vel,
             current_joint_eff=self.dof_force_tensor,
             init_joint_pos=self._robot_limits["joint_pos"].default,
-            obj_linvel=self.obj_base_linvel,
             lambda_pose_penalty=self.cfg["env"]["lambda_pose_penalty"],
             lambda_torque_penalty=self.cfg["env"]["lambda_torque_penalty"],
             lambda_work_penalty=self.cfg["env"]["lambda_work_penalty"],
             lambda_linvel_penalty=self.cfg["env"]["lambda_linvel_penalty"],
+
+            # obj smoothness
+            obj_linvel=self.obj_base_linvel,
+            current_pivot_axel=self.pivot_axel_objframe,
+            lambda_axis_cos_dist=self.cfg["env"]["lambda_axis_cos_dist"],
 
             # hybrid reward
             obj_base_pos=centered_obj_pos,
