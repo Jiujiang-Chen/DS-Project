@@ -11,9 +11,7 @@ from isaacgym.torch_utils import quat_rotate
 from isaacgym.torch_utils import quat_from_angle_axis
 
 from smg_gym.tasks.base_hand import BaseShadowModularGrasper
-from smg_gym.tasks.reorient.rewards import compute_keypoint_reorient_reward
-from smg_gym.tasks.reorient.rewards import compute_hybrid_reorient_reward
-from smg_gym.tasks.gaiting.rewards import compute_rma_angvel_reward
+from smg_gym.tasks.gaiting.rewards import compute_gaiting_reward
 
 
 class BaseGaiting(BaseShadowModularGrasper):
@@ -31,11 +29,7 @@ class BaseGaiting(BaseShadowModularGrasper):
         self.default_pivot_axel = default_pivot_axel/np.linalg.norm(default_pivot_axel)
 
         # reward / termination vars
-        self.reward_type = cfg["env"]["reward_type"]
         self.max_episode_length = cfg["env"]["episode_length"]
-
-        if self.reward_type not in ["hybrid", "keypoint", "angvel"]:
-            raise ValueError('Incorrect reward mode specified.')
 
         # task specific randomisation params
         self.rand_pivot_pos = cfg["rand_params"]["rand_pivot_pos"]
@@ -117,11 +111,6 @@ class BaseGaiting(BaseShadowModularGrasper):
                 reset_buf=self.reset_buf,
                 sim_initialized=self.sim_initialized
             )
-            # print env params after randomisation
-            # params, names, lows, highs = self.domain_randomizer.get_actor_params_info(self.envs[0])
-            # print('')
-            # for param, name, low, high in zip(params, names, lows, highs):
-            #     print(name, param, low, high)
 
         env_ids_for_reset = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
         goal_env_ids_for_reset = self.reset_goal_buf.nonzero(as_tuple=False).squeeze(-1)
@@ -222,137 +211,83 @@ class BaseGaiting(BaseShadowModularGrasper):
         Calculate the reward and termination (including goal successes) per env.
         """
 
+        centered_obj_pos = self.obj_base_pos - self.obj_displacement_tensor
+        centered_goal_pos = self.goal_base_pos - self.goal_displacement_tensor
+
         centered_obj_kp_pos = self.obj_kp_positions - \
             self.obj_displacement_tensor.unsqueeze(0).unsqueeze(1).repeat(self.num_envs, self.n_keypoints, 1)
         centered_goal_kp_pos = self.goal_kp_positions - \
             self.goal_displacement_tensor.unsqueeze(0).unsqueeze(1).repeat(self.num_envs, self.n_keypoints, 1) - \
             self.pivot_point_pos_offset.unsqueeze(1).repeat(1, self.n_keypoints, 1)
 
-        # shadow hand pos + orn distance rew
-        if self.reward_type == 'hybrid':
-            (
-                self.rew_buf[:],
-                self.reset_buf[:],
-                self.reset_goal_buf[:],
-                self.successes[:],
-                self.consecutive_successes[:],
-                log_dict
-            ) = compute_hybrid_reorient_reward(
-                rew_buf=self.rew_buf,
-                reset_buf=self.reset_buf,
-                progress_buf=self.progress_buf,
-                reset_goal_buf=self.reset_goal_buf,
-                successes=self.successes,
-                consecutive_successes=self.consecutive_successes,
-                obj_base_pos=self.obj_base_pos - self.obj_displacement_tensor,
-                obj_base_orn=self.obj_base_orn,
-                targ_base_pos=self.goal_base_pos - self.goal_displacement_tensor,
-                targ_base_orn=self.goal_base_orn,
-                actions=self.action_buf,
-                n_tip_contacts=self.n_tip_contacts,
-                dist_reward_scale=self.cfg["env"]["dist_reward_scale"],
-                rot_reward_scale=self.cfg["env"]["rot_reward_scale"],
-                rot_eps=self.cfg["env"]["rot_eps"],
-                success_tolerance=self.cfg["env"]["rot_success_tolerance"],
-                max_episode_length=self.cfg["env"]["episode_length"],
-                fall_reset_dist=self.cfg["env"]["fall_reset_dist"],
-                require_contact=self.cfg["env"]["require_contact"],
-                contact_reward_scale=self.cfg["env"]["contact_reward_scale"],
-                action_penalty_scale=self.cfg["env"]["action_penalty_scale"],
-                reach_goal_bonus=self.cfg["env"]["reach_goal_bonus"],
-                fall_penalty=self.cfg["env"]["fall_penalty"],
-                av_factor=self.cfg["env"]["av_factor"],
-            )
+        (
+            self.rew_buf[:],
+            self.reset_buf[:],
+            self.reset_goal_buf[:],
+            self.successes[:],
+            self.consecutive_successes[:],
+            log_dict
+        ) = compute_gaiting_reward(
+            # standard
+            rew_buf=self.rew_buf,
+            reset_buf=self.reset_buf,
+            progress_buf=self.progress_buf,
+            reset_goal_buf=self.reset_goal_buf,
+            successes=self.successes,
+            consecutive_successes=self.consecutive_successes,
 
-        # trifinger - keypoint distance reward
-        elif self.reward_type == 'keypoint':
-            (
-                self.rew_buf[:],
-                self.reset_buf[:],
-                self.reset_goal_buf[:],
-                self.successes[:],
-                self.consecutive_successes[:],
-                log_dict
-            ) = compute_keypoint_reorient_reward(
-                rew_buf=self.rew_buf,
-                reset_buf=self.reset_buf,
-                progress_buf=self.progress_buf,
-                reset_goal_buf=self.reset_goal_buf,
-                successes=self.successes,
-                consecutive_successes=self.consecutive_successes,
-                obj_kps=centered_obj_kp_pos,
-                goal_kps=centered_goal_kp_pos,
-                obj_linvel=self.obj_base_linvel,
-                obj_angvel=self.obj_base_angvel,
-                actions=self.action_buf,
-                n_tip_contacts=self.n_tip_contacts,
-                n_non_tip_contacts=self.n_non_tip_contacts,
-                current_joint_pos=self.hand_joint_pos,
-                init_joint_pos=self._robot_limits["joint_pos"].default,
-                lgsk_scale=self.cfg["env"]["lgsk_scale"],
-                lgsk_eps=self.cfg["env"]["lgsk_eps"],
-                kp_dist_scale=self.cfg["env"]["kp_dist_scale"],
-                hand_pose_penalty_scale=self.cfg["env"]["hand_pose_penalty_scale"],
-                obj_linvel_penalty_scale=self.cfg["env"]["obj_linvel_penalty_scale"],
-                success_tolerance=self.cfg["env"]["kp_success_tolerance"],
-                max_episode_length=self.cfg["env"]["episode_length"],
-                fall_reset_dist=self.cfg["env"]["fall_reset_dist"],
-                require_contact=self.cfg["env"]["require_contact"],
-                contact_reward_scale=self.cfg["env"]["contact_reward_scale"],
-                bad_contact_penalty_scale=self.cfg["env"]["bad_contact_penalty_scale"],
-                action_penalty_scale=self.cfg["env"]["action_penalty_scale"],
-                reach_goal_bonus=self.cfg["env"]["reach_goal_bonus"],
-                fall_penalty=self.cfg["env"]["fall_penalty"],
-                av_factor=self.cfg["env"]["av_factor"],
-            )
+            # termination and success criteria
+            max_episode_length=self.cfg["env"]["episode_length"],
+            fall_reset_dist=self.cfg["env"]["fall_reset_dist"],
+            success_tolerance=self.cfg["env"]["success_tolerance"],
+            av_factor=self.cfg["env"]["av_factor"],
 
-        # rapid motor adaption angvel reward
-        elif self.reward_type == 'angvel':
-            (
-                self.rew_buf[:],
-                self.reset_buf[:],
-                self.reset_goal_buf[:],
-                self.successes[:],
-                self.consecutive_successes[:],
-                log_dict
-            ) = compute_rma_angvel_reward(
-                rew_buf=self.rew_buf,
-                reset_buf=self.reset_buf,
-                progress_buf=self.progress_buf,
-                reset_goal_buf=self.reset_goal_buf,
-                successes=self.successes,
-                consecutive_successes=self.consecutive_successes,
+            # success
+            obj_kps=centered_obj_kp_pos,
+            goal_kps=centered_goal_kp_pos,
+            reach_goal_bonus=self.cfg["env"]["reach_goal_bonus"],
+            drop_obj_penalty=self.cfg["env"]["drop_obj_penalty"],
 
-                obj_kps=centered_obj_kp_pos,
-                goal_kps=centered_goal_kp_pos,
-                actions=self.action_buf,
-                n_tip_contacts=self.n_tip_contacts,
-                n_non_tip_contacts=self.n_non_tip_contacts,
+            # precision grasping rew
+            n_tip_contacts=self.n_tip_contacts,
+            n_non_tip_contacts=self.n_non_tip_contacts,
+            require_contact=self.cfg["env"]["require_contact"],
+            lamda_good_contact=self.cfg["env"]["lamda_good_contact"],
+            lamda_bad_contact=self.cfg["env"]["lamda_bad_contact"],
 
-                object_angvel=self.obj_base_angvel,
-                target_pivot_axel=self.pivot_axel_worldframe,
+            # smoothness rewards
+            actions=self.action_buf,
+            current_joint_pos=self.hand_joint_pos,
+            current_joint_vel=self.hand_joint_vel,
+            current_joint_eff=self.dof_force_tensor,
+            init_joint_pos=self._robot_limits["joint_pos"].default,
+            obj_linvel=self.obj_base_linvel,
+            lambda_pose_penalty=self.cfg["env"]["lambda_pose_penalty"],
+            lambda_torque_penalty=self.cfg["env"]["lambda_torque_penalty"],
+            lambda_work_penalty=self.cfg["env"]["lambda_work_penalty"],
+            lambda_linvel_penalty=self.cfg["env"]["lambda_linvel_penalty"],
 
-                current_joint_pos=self.hand_joint_pos,
-                # init_joint_pos=self.init_dof_pos,
-                init_joint_pos=self._robot_limits["joint_pos"].default,
+            # hybrid reward
+            obj_base_pos=centered_obj_pos,
+            obj_base_orn=self.obj_base_orn,
+            goal_base_pos=centered_goal_pos,
+            goal_base_orn=self.goal_base_orn,
+            lambda_hb_dist=self.cfg["env"]["lambda_hb_dist"],
+            lambda_hb_rot=self.cfg["env"]["lambda_hb_rot"],
+            hb_rot_eps=self.cfg["env"]["hb_rot_eps"],
 
-                angvel_clip_min=self.cfg["env"]["angvel_clip_min"],
-                angvel_clip_max=self.cfg["env"]["angvel_clip_max"],
-                lambda_angvel=self.cfg["env"]["lambda_angvel"],
-                lambda_pose=self.cfg["env"]["lambda_pose"],
-                lambda_torque=self.cfg["env"]["lambda_torque"],
-                lambda_work=self.cfg["env"]["lambda_work"],
-                lambda_linvel=self.cfg["env"]["lambda_linvel"],
+            # kp reward
+            lambda_kp=self.cfg["env"]["lambda_kp"],
+            kp_lgsk_scale=self.cfg["env"]["kp_lgsk_scale"],
+            kp_lgsk_eps=self.cfg["env"]["kp_lgsk_eps"],
 
-                success_tolerance=self.cfg["env"]["kp_success_tolerance"],
-                max_episode_length=self.cfg["env"]["episode_length"],
-                fall_reset_dist=self.cfg["env"]["fall_reset_dist"],
-                require_contact=self.cfg["env"]["require_contact"],
-                contact_reward_scale=self.cfg["env"]["contact_reward_scale"],
-                bad_contact_penalty_scale=self.cfg["env"]["bad_contact_penalty_scale"],
-
-                av_factor=self.cfg["env"]["av_factor"],
-            )
+            # angvel reward
+            obj_angvel=self.obj_base_angvel,
+            target_pivot_axel=self.pivot_axel_worldframe,
+            lambda_av=self.cfg["env"]["lambda_av"],
+            av_clip_min=self.cfg["env"]["av_clip_min"],
+            av_clip_max=self.cfg["env"]["av_clip_max"],
+        )
 
         self.extras.update({"metrics/"+k: v.mean() for k, v in log_dict.items()})
 

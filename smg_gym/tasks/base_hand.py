@@ -1516,7 +1516,6 @@ class BaseShadowModularGrasper(VecTask):
         fingertip_states = self.rigid_body_tensor[:, self.fingertip_tcp_body_idxs, :]
         self.fingertip_pos = fingertip_states[..., 0:3].reshape(self.num_envs, self._dims.FingertipPosDim.value)
         self.fingertip_orn = self.canonicalise_quat(fingertip_states[..., 3:7])
-        # self.fingertip_orn[torch.where(self.fingertip_orn[..., 3] < 0)] *= -1  # canonicalise
         self.fingertip_linvel = fingertip_states[..., 7:10]
         self.fingertip_angvel = fingertip_states[..., 10:13]
 

@@ -1,213 +1,136 @@
 from typing import Tuple, Dict
 import torch
+
+from isaacgym.torch_utils import quat_mul
+from isaacgym.torch_utils import quat_conjugate
+
 from smg_gym.utils.torch_jit_utils import lgsk_kernel
 
 
 @torch.jit.script
-def compute_conditional_angvel_reward(
-    obj_base_pos: torch.Tensor,
-    pivot_point_pos: torch.Tensor,
-    target_pivot_axel: torch.Tensor,
-    current_pivot_axel: torch.Tensor,
-    object_angvel: torch.Tensor,
-    actions: torch.Tensor,
-    max_episode_length: float,
-    fall_reset_dist: float,
-    n_tip_contacts: torch.Tensor,
-    require_contact: bool,
-    pos_reward_scale: float,
-    orn_reward_scale: float,
-    vel_reward_scale: float,
-    contact_reward_scale: float,
-    action_penalty_scale: float,
-    fall_penalty_scale: float,
-    rew_buf: torch.Tensor,
-    reset_buf: torch.Tensor,
-    progress_buf: torch.Tensor,
-    angvel_buf: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
-
-    angle_lim = 30  # degrees
-    pos_lim = 0.025
-    n_contact_lim = 2
-    r_min, r_max = -1.0, 1.0
-
-    # Distance from the pivot point to the object base
-    dist_from_pivot = torch.norm(obj_base_pos - pivot_point_pos, p=2, dim=-1)
-
-    # Calculate orientation distance from starting orientation.
-    axel_cos_sim = torch.nn.functional.cosine_similarity(target_pivot_axel, current_pivot_axel, dim=1, eps=1e-12)
-    axel_degree_dist = torch.acos(axel_cos_sim) * (180 / torch.pi)
-
-    # Angular velocity reward
-    obj_angvel_about_axis = torch.sum(object_angvel * current_pivot_axel, dim=1)
-    angvel_buf += obj_angvel_about_axis
-
-    # add penalty for large actions
-    action_penalty = torch.sum(actions ** 2, dim=-1) * -action_penalty_scale
-
-    # apply reward conditionals
-    total_reward = torch.clamp(obj_angvel_about_axis, min=r_min, max=r_max) * vel_reward_scale
-    total_reward = torch.where(n_tip_contacts < n_contact_lim, torch.zeros_like(rew_buf), total_reward)
-    total_reward = torch.where(axel_degree_dist > angle_lim, torch.zeros_like(rew_buf), total_reward)
-    total_reward = torch.where(dist_from_pivot > pos_lim, torch.zeros_like(rew_buf), total_reward)
-
-    # Fall penalty: distance to the goal is larger than a threashold
-    total_reward = torch.where(dist_from_pivot >= fall_reset_dist, total_reward + fall_penalty_scale, total_reward)
-
-    # Check env termination conditions, including maximum success number
-    resets = torch.zeros_like(reset_buf)
-    resets = torch.where(dist_from_pivot >= fall_reset_dist, torch.ones_like(reset_buf), resets)
-    resets = torch.where(progress_buf >= max_episode_length, torch.ones_like(resets), resets)
-
-    info: Dict[str, torch.Tensor] = {
-        'dist_from_pivot': dist_from_pivot,
-        'axel_degree_dist': axel_degree_dist,
-        'obj_angvel_about_axis': obj_angvel_about_axis,
-        'action_penalty': action_penalty,
-        'num_tip_contacts': n_tip_contacts,
-        'total_reward': total_reward,
-    }
-
-    return total_reward, resets, angvel_buf, info
-
-
-@torch.jit.script
-def compute_dense_angvel_reward(
-    obj_base_pos: torch.Tensor,
-    pivot_point_pos: torch.Tensor,
-    target_pivot_axel: torch.Tensor,
-    current_pivot_axel: torch.Tensor,
-    object_angvel: torch.Tensor,
-    actions: torch.Tensor,
-    max_episode_length: float,
-    fall_reset_dist: float,
-    n_tip_contacts: torch.Tensor,
-    require_contact: bool,
-    pos_reward_scale: float,
-    orn_reward_scale: float,
-    vel_reward_scale: float,
-    contact_reward_scale: float,
-    action_penalty_scale: float,
-    fall_penalty_scale: float,
-    rew_buf: torch.Tensor,
-    reset_buf: torch.Tensor,
-    progress_buf: torch.Tensor,
-    angvel_buf: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
-
-    n_contact_lim = 2
-    r_min, r_max = -1.0, 1.0
-
-    # Distance from the pivot point to the object base
-    dist_from_pivot = torch.norm(obj_base_pos - pivot_point_pos, p=2, dim=-1)
-
-    # Calculate orientation distance from starting orientation.
-    axel_cos_sim = torch.nn.functional.cosine_similarity(target_pivot_axel, current_pivot_axel, dim=1, eps=1e-12)
-    axel_degree_dist = torch.acos(axel_cos_sim) * (180 / torch.pi)
-
-    # Angular velocity reward
-    obj_angvel_about_axis = torch.sum(object_angvel * target_pivot_axel, dim=1)
-
-    # bound and scale rewards such that they are in similar ranges
-    pos_dist_rew = lgsk_kernel(dist_from_pivot, scale=50., eps=2.) * pos_reward_scale
-    axel_dist_rew = axel_cos_sim * orn_reward_scale
-    angvel_rew = torch.clamp(obj_angvel_about_axis, min=r_min, max=r_max) * vel_reward_scale
-
-    # add reward for maintaining tips in contact
-    contact_rew = n_tip_contacts * contact_reward_scale
-
-    # add penalty for large actions
-    action_penalty = torch.sum(actions ** 2, dim=-1) * -action_penalty_scale
-
-    # Total reward is: position distance + orientation alignment + action regularization + success bonus + fall penalty
-    total_reward = pos_dist_rew + axel_dist_rew + angvel_rew + contact_rew + action_penalty
-
-    # zero reward when less than 2 tips in contact
-    total_reward = torch.where(n_tip_contacts < n_contact_lim, torch.zeros_like(rew_buf), total_reward)
-
-    # Fall penalty: distance to the goal is larger than a threashold
-    total_reward = torch.where(dist_from_pivot >= fall_reset_dist, total_reward + fall_penalty_scale, total_reward)
-
-    # Check env termination conditions, including maximum success number
-    resets = torch.zeros_like(reset_buf)
-    resets = torch.where(dist_from_pivot >= fall_reset_dist, torch.ones_like(reset_buf), resets)
-    resets = torch.where(progress_buf >= max_episode_length, torch.ones_like(resets), resets)
-
-    info: Dict[str, torch.Tensor] = {
-        'dist_from_pivot': dist_from_pivot,
-        'axel_degree_dist': axel_degree_dist,
-        'obj_angvel_about_axis': obj_angvel_about_axis,
-        'action_penalty': action_penalty,
-        'num_tip_contacts': n_tip_contacts,
-        'total_reward': total_reward,
-    }
-
-    return total_reward, resets, info
-
-
-@torch.jit.script
-def compute_rma_angvel_reward(
+def compute_gaiting_reward(
+    # standard
     rew_buf: torch.Tensor,
     reset_buf: torch.Tensor,
     progress_buf: torch.Tensor,
     reset_goal_buf: torch.Tensor,
     successes: torch.Tensor,
     consecutive_successes: torch.Tensor,
-    obj_kps: torch.Tensor,
-    goal_kps: torch.Tensor,
-    actions: torch.Tensor,
-    n_tip_contacts: torch.Tensor,
-    n_non_tip_contacts: torch.Tensor,
 
-    object_angvel: torch.Tensor,
-    target_pivot_axel: torch.Tensor,
-
-    current_joint_pos: torch.Tensor,
-    init_joint_pos: torch.Tensor,
-
-    angvel_clip_min: float,
-    angvel_clip_max: float,
-    lambda_angvel: float,
-    lambda_pose: float,
-    lambda_torque: float,
-    lambda_work: float,
-    lambda_linvel: float,
-
-    success_tolerance: float,
+    # termination and success criteria
     max_episode_length: float,
     fall_reset_dist: float,
-    require_contact: bool,
-    contact_reward_scale: float,
-    bad_contact_penalty_scale: float,
+    success_tolerance: float,
     av_factor: float,
+
+    # success
+    obj_kps: torch.Tensor,
+    goal_kps: torch.Tensor,
+    reach_goal_bonus: float,
+    drop_obj_penalty: float,
+
+    # precision grasping rew
+    n_tip_contacts: torch.Tensor,
+    n_non_tip_contacts: torch.Tensor,
+    require_contact: bool,
+    lamda_good_contact: float,
+    lamda_bad_contact: float,
+
+    # smoothness rewards
+    actions: torch.Tensor,
+    current_joint_pos: torch.Tensor,
+    current_joint_vel: torch.Tensor,
+    current_joint_eff: torch.Tensor,
+    init_joint_pos: torch.Tensor,
+    obj_linvel: torch.Tensor,
+    lambda_pose_penalty: float,
+    lambda_torque_penalty: float,
+    lambda_work_penalty: float,
+    lambda_linvel_penalty: float,
+
+    # hybrid reward
+    obj_base_pos: torch.Tensor,
+    obj_base_orn: torch.Tensor,
+    goal_base_pos: torch.Tensor,
+    goal_base_orn: torch.Tensor,
+    lambda_hb_dist: float,
+    lambda_hb_rot: float,
+    hb_rot_eps: float,
+
+    # kp reward
+    lambda_kp: float,
+    kp_lgsk_scale: float,
+    kp_lgsk_eps: float,
+
+    # angvel reward
+    obj_angvel: torch.Tensor,
+    target_pivot_axel: torch.Tensor,
+    lambda_av: float,
+    av_clip_min: float,
+    av_clip_max: float,
 
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
 
-    # Distance from the pivot point to the object base
+    # HYBRID REWARD
+    # distance between obj and goal COM
+    hb_com_dist_rew = -torch.norm(obj_base_pos - goal_base_pos, p=2, dim=-1)
+
+    # cosine distance between obj and goal orientation
+    hb_quat_diff = quat_mul(obj_base_orn, quat_conjugate(goal_base_orn))
+    hb_rot_dist = 2.0 * torch.asin(torch.clamp(torch.norm(hb_quat_diff[:, 0:3], p=2, dim=-1), max=1.0))
+    hb_rot_rew = (1.0 / (torch.abs(hb_rot_dist) + hb_rot_eps))
+
+    # KEYPOINT REWARD
+    # distance between obj and goal keypoints
     kp_deltas = torch.norm(obj_kps - goal_kps, p=2, dim=-1)
-    min_kp_dist, _ = kp_deltas.min(dim=-1)
-    # max_kp_dist, _ = kp_deltas.max(dim=-1)
     mean_kp_dist = kp_deltas.mean(dim=-1)
+    kp_rew = lgsk_kernel(kp_deltas, scale=kp_lgsk_scale, eps=kp_lgsk_eps).mean(dim=-1)
 
-    # Angular velocity reward
+    # ANGVEL REWARD
     # bound and scale rewards such that they are in similar ranges
-    obj_angvel_about_axis = torch.sum(object_angvel * target_pivot_axel, dim=1)
-    angvel_rew = lambda_angvel * torch.clamp(obj_angvel_about_axis, min=angvel_clip_min, max=angvel_clip_max)
+    obj_angvel_about_axis = torch.sum(obj_angvel * target_pivot_axel, dim=1)
+    av_rew = torch.clamp(obj_angvel_about_axis, min=av_clip_min, max=av_clip_max)
 
+    # SMOOTHNESS
     # Penalty for deviating from the original grasp pose by too much
-    hand_pose_penalty = -lambda_pose * torch.norm(current_joint_pos - init_joint_pos, p=2, dim=-1)
-    # hand_pose_penalty = -lambda_pose * torch.zeros_like(rew_buf)
+    hand_pose_penalty = -torch.norm(current_joint_pos - init_joint_pos, p=2, dim=-1)
 
-    torque_penalty = -lambda_torque * torch.zeros_like(rew_buf)
-    work_penalty = -lambda_work * torch.zeros_like(rew_buf)
-    linvel_penalty = -lambda_linvel * torch.zeros_like(rew_buf)
+    # Penalty for high torque
+    torque_penalty = -torch.norm(current_joint_eff, p=2, dim=-1)
+
+    # Penalty for high work
+    work_penalty = -torch.sum(torch.abs(current_joint_eff * current_joint_vel), dim=-1)
+
+    # Penalty for object linear velocity
+    obj_linvel_penalty = -torch.norm(obj_linvel, p=2, dim=-1)
 
     # Total reward is: position distance + orientation alignment + action regularization + success bonus + fall penalty
-    total_reward = angvel_rew + hand_pose_penalty + torque_penalty + work_penalty + linvel_penalty
+    total_reward = \
+        lambda_hb_dist * hb_com_dist_rew + \
+        lambda_hb_rot * hb_rot_rew + \
+        lambda_kp * kp_rew + \
+        lambda_av * av_rew + \
+        lambda_pose_penalty * hand_pose_penalty + \
+        lambda_torque_penalty * torque_penalty + \
+        lambda_work_penalty * work_penalty + \
+        lambda_linvel_penalty * obj_linvel_penalty
+
+    # PRECISION GRASP
+    # add reward for contacting with tips
+    total_reward = torch.where(n_tip_contacts >= 2, total_reward + lamda_good_contact, total_reward)
 
     # add penalty for contacting with links other than the tips
-    total_reward = torch.where(n_non_tip_contacts > 0, total_reward - bad_contact_penalty_scale, total_reward)
+    total_reward = torch.where(n_non_tip_contacts > 0, total_reward - lamda_bad_contact, total_reward)
+
+    # zero reward when less than 2 tips in contact
+    if require_contact:
+        total_reward = torch.where(n_tip_contacts < 2, torch.zeros_like(rew_buf), total_reward)
+
+    # Success bonus: orientation is within `success_tolerance` of goal orientation
+    total_reward = torch.where(mean_kp_dist <= success_tolerance, total_reward + reach_goal_bonus, total_reward)
+
+    # Fall penalty: distance to the goal is larger than a threashold
+    total_reward = torch.where(mean_kp_dist >= fall_reset_dist, total_reward + drop_obj_penalty, total_reward)
 
     # Find out which envs hit the goal and update successes count
     goal_resets = torch.where(mean_kp_dist <= success_tolerance, torch.ones_like(reset_goal_buf), reset_goal_buf)
@@ -215,7 +138,7 @@ def compute_rma_angvel_reward(
 
     # Check env termination conditions, including maximum success number
     resets = torch.zeros_like(reset_buf)
-    resets = torch.where(min_kp_dist >= fall_reset_dist, torch.ones_like(reset_buf), resets)
+    resets = torch.where(mean_kp_dist >= fall_reset_dist, torch.ones_like(reset_buf), resets)
     resets = torch.where(progress_buf >= max_episode_length, torch.ones_like(resets), resets)
 
     # find average consecutive successes
@@ -228,15 +151,23 @@ def compute_rma_angvel_reward(
     )
 
     info: Dict[str, torch.Tensor] = {
+
         'successes': successes,
-        'cons_successes': cons_successes,
+        'successes_cons': cons_successes,
+
         'num_tip_contacts': n_tip_contacts,
         'num_non_tip_contacts': n_non_tip_contacts,
-        'total_reward': total_reward,
+
+        'reward_hybrid_dist': hb_com_dist_rew,
+        'reward_hybrid_rot': hb_rot_rew,
+        'reward_keypoint': kp_rew,
+        'reward_angvel': av_rew,
+        'reward_total': total_reward,
+
         'penalty_hand_pose': hand_pose_penalty,
-        'penalty_torque': torque_penalty,
-        'penalty_work': work_penalty,
-        'penalty_linvel': linvel_penalty,
+        'penalty_hand_torque': torque_penalty,
+        'penalty_hand_work': work_penalty,
+        'penalty_obj_linvel': obj_linvel_penalty,
     }
 
     return total_reward, resets, goal_resets, successes, cons_successes, info

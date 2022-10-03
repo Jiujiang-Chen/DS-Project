@@ -25,7 +25,7 @@ env:
   clip_observations: 5.0
   clip_actions: 1.0
 
-  enable_dof_force_sensors: False
+  enable_dof_force_sensors: True
   contact_sensor_modality: 'default'
   # contact_sensor_modality: 'ft_sensor'
   # contact_sensor_modality: 'rich_cpu'
@@ -40,42 +40,39 @@ env:
 
   # shared reward/termination
   episode_length: 200
-  # fall_reset_dist: 0.15
-  av_factor: 0.01
-  require_contact: False
-  contact_reward_scale: 0.0
-  # bad_contact_penalty_scale: 0.1
-  action_penalty_scale: 0.0
-  reach_goal_bonus: 10.0
-  fall_penalty: 0.0
-
-  # reward_type: "hybrid"
-  dist_reward_scale: -10.0
-  rot_reward_scale: 1.0
-  rot_success_tolerance: 0.1
-  rot_eps: 0.1
-
-  reward_type: "keypoint"
-  bad_contact_penalty_scale: 0.1
   fall_reset_dist: 0.05
-  kp_success_tolerance: 0.015
-  lgsk_scale: 50.0
-  lgsk_eps: 2.0
-  kp_dist_scale: 1.0
-  hand_pose_penalty_scale: 0.1
-  obj_linvel_penalty_scale: 0.0
+  success_tolerance: 0.015
+  av_factor: 0.01
 
-  # reward_type: "angvel"
-  # bad_contact_penalty_scale: 0.25
-  # fall_reset_dist: 0.05
-  angvel_clip_min: -0.5
-  angvel_clip_max: 0.5
-  lambda_angvel: 1.0
-  lambda_pose: 0.3
-  lambda_torque: 0.1
-  lambda_work: 2.0
-  lambda_linvel: 0.3
+  # sparse reward components
+  reach_goal_bonus: 10.0
+  drop_obj_penalty: 0.0
 
+  # precision grasp components
+  require_contact: False
+  lamda_good_contact: 0.0
+  lamda_bad_contact: 0.1
+
+  # smoothness
+  lambda_pose_penalty: 0.0 # 0.3
+  lambda_torque_penalty: 0.0
+  lambda_work_penalty: 0.0
+  lambda_linvel_penalty: 0.0
+
+  # hybrid reward params
+  lambda_hb_dist: 5.0 # 0.1
+  lambda_hb_rot: 0.0 # 0.01
+  hb_rot_eps: 0.1
+
+  # keypoint reward params
+  lambda_kp: 0.0 # 1.0
+  kp_lgsk_scale: 50.0
+  kp_lgsk_eps: 2.0
+
+  # angvel reward params
+  lambda_av: 1.0
+  av_clip_min: -0.5
+  av_clip_max: 0.5
 
 rand_params:
   randomize: True
@@ -84,8 +81,8 @@ rand_params:
   rand_obj_scale: False
   rand_pivot_pos: False
   # rand_pivot_axel: 'full_rand'
-  rand_pivot_axel: 'cardinal'
-  # rand_pivot_axel: 'none'
+  # rand_pivot_axel: 'cardinal'
+  rand_pivot_axel: 'none'
 
 sim:
   dt: 0.016667
