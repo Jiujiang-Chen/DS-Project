@@ -267,18 +267,18 @@ class BaseGaiting(BaseShadowModularGrasper):
             lambda_linvel_penalty=self.cfg["env"]["lambda_linvel_penalty"],
 
             # obj smoothness
+            obj_base_pos=centered_obj_pos,
+            goal_base_pos=centered_goal_pos,
             obj_linvel=self.obj_base_linvel,
-            current_pivot_axel=self.pivot_axel_objframe,
+            current_pivot_axel=quat_rotate(self.obj_base_orn, self.pivot_axel_objframe),
+            lambda_com_dist=self.cfg["env"]["lambda_com_dist"],
             lambda_axis_cos_dist=self.cfg["env"]["lambda_axis_cos_dist"],
 
-            # hybrid reward
-            obj_base_pos=centered_obj_pos,
+            # rot reward
             obj_base_orn=self.obj_base_orn,
-            goal_base_pos=centered_goal_pos,
             goal_base_orn=self.goal_base_orn,
-            lambda_hb_dist=self.cfg["env"]["lambda_hb_dist"],
-            lambda_hb_rot=self.cfg["env"]["lambda_hb_rot"],
-            hb_rot_eps=self.cfg["env"]["hb_rot_eps"],
+            lambda_rot=self.cfg["env"]["lambda_rot"],
+            rot_eps=self.cfg["env"]["rot_eps"],
 
             # kp reward
             lambda_kp=self.cfg["env"]["lambda_kp"],

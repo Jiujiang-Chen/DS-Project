@@ -108,8 +108,11 @@ class BaseShadowModularGrasper(VecTask):
 
         # change viewer camera
         if self.viewer is not None:
-            cam_pos = gymapi.Vec3(2, 2, 2)
-            cam_target = gymapi.Vec3(0, 0, 1)
+            # cam_pos = gymapi.Vec3(2, 2, 2)
+            # cam_target = gymapi.Vec3(0, 0, 1)
+            # self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
+            cam_pos = gymapi.Vec3(0.5, 0.5, 0.75)
+            cam_target = gymapi.Vec3(0, 0, 0.25)
             self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
 
         # initialize the buffers

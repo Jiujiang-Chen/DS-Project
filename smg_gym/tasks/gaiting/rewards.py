@@ -48,18 +48,18 @@ def compute_gaiting_reward(
     lambda_linvel_penalty: float,
 
     # obj smoothness reward
+    obj_base_pos: torch.Tensor,
+    goal_base_pos: torch.Tensor,
     obj_linvel: torch.Tensor,
     current_pivot_axel: torch.Tensor,
+    lambda_com_dist: float,
     lambda_axis_cos_dist: float,
 
     # hybrid reward
-    obj_base_pos: torch.Tensor,
     obj_base_orn: torch.Tensor,
-    goal_base_pos: torch.Tensor,
     goal_base_orn: torch.Tensor,
-    lambda_hb_dist: float,
-    lambda_hb_rot: float,
-    hb_rot_eps: float,
+    lambda_rot: float,
+    rot_eps: float,
 
     # kp reward
     lambda_kp: float,
@@ -75,14 +75,11 @@ def compute_gaiting_reward(
 
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
 
-    # HYBRID REWARD
-    # distance between obj and goal COM
-    hb_com_dist_rew = -torch.norm(obj_base_pos - goal_base_pos, p=2, dim=-1)
-
+    # ROTATION REWARD
     # cosine distance between obj and goal orientation
-    hb_quat_diff = quat_mul(obj_base_orn, quat_conjugate(goal_base_orn))
-    hb_rot_dist = 2.0 * torch.asin(torch.clamp(torch.norm(hb_quat_diff[:, 0:3], p=2, dim=-1), max=1.0))
-    hb_rot_rew = (1.0 / (torch.abs(hb_rot_dist) + hb_rot_eps))
+    quat_diff = quat_mul(obj_base_orn, quat_conjugate(goal_base_orn))
+    rot_dist = 2.0 * torch.asin(torch.clamp(torch.norm(quat_diff[:, 0:3], p=2, dim=-1), max=1.0))
+    rot_rew = (1.0 / (torch.abs(rot_dist) + rot_eps))
 
     # KEYPOINT REWARD
     # distance between obj and goal keypoints
@@ -104,23 +101,22 @@ def compute_gaiting_reward(
     work_penalty = -torch.sum(torch.abs(current_joint_eff * current_joint_vel), dim=-1)
 
     # OBJECT SMOOTHNESS
+    # distance between obj and goal COM
+    com_dist_rew = -torch.norm(obj_base_pos - goal_base_pos, p=2, dim=-1)
     # Penalty for object linear velocity
     obj_linvel_penalty = -torch.norm(obj_linvel, p=2, dim=-1)
     # Penalty for axis deviation
-    axis_cos_dist = 1.0 - torch.nn.functional.cosine_similarity(target_pivot_axel, current_pivot_axel, dim=1, eps=1e-12)
-    print(target_pivot_axel)
-    print(current_pivot_axel)
-    print(axis_cos_dist)
+    axis_cos_dist = -(1.0 - torch.nn.functional.cosine_similarity(target_pivot_axel, current_pivot_axel, dim=1, eps=1e-12))
 
     # Total reward is: position distance + orientation alignment + action regularization + success bonus + fall penalty
     total_reward = \
-        lambda_hb_dist * hb_com_dist_rew + \
-        lambda_hb_rot * hb_rot_rew + \
+        lambda_rot * rot_rew + \
         lambda_kp * kp_rew + \
         lambda_av * av_rew + \
         lambda_pose_penalty * hand_pose_penalty + \
         lambda_torque_penalty * torque_penalty + \
         lambda_work_penalty * work_penalty + \
+        lambda_com_dist * com_dist_rew + \
         lambda_linvel_penalty * obj_linvel_penalty + \
         lambda_axis_cos_dist * axis_cos_dist
 
@@ -131,15 +127,15 @@ def compute_gaiting_reward(
     # add penalty for contacting with links other than the tips
     total_reward = torch.where(n_non_tip_contacts > 0, total_reward - lamda_bad_contact, total_reward)
 
-    # zero reward when less than 2 tips in contact
-    if require_contact:
-        total_reward = torch.where(n_tip_contacts < 2, torch.zeros_like(rew_buf), total_reward)
-
     # Success bonus: orientation is within `success_tolerance` of goal orientation
     total_reward = torch.where(mean_kp_dist <= success_tolerance, total_reward + reach_goal_bonus, total_reward)
 
     # Fall penalty: distance to the goal is larger than a threashold
-    total_reward = torch.where(mean_kp_dist >= fall_reset_dist, total_reward + drop_obj_penalty, total_reward)
+    total_reward = torch.where(mean_kp_dist >= fall_reset_dist, total_reward - drop_obj_penalty, total_reward)
+
+    # zero reward when less than 2 tips in contact
+    if require_contact:
+        total_reward = torch.where(n_tip_contacts < 2, torch.zeros_like(rew_buf), total_reward)
 
     # Find out which envs hit the goal and update successes count
     goal_resets = torch.where(mean_kp_dist <= success_tolerance, torch.ones_like(reset_goal_buf), reset_goal_buf)
@@ -167,8 +163,7 @@ def compute_gaiting_reward(
         'num_tip_contacts': n_tip_contacts,
         'num_non_tip_contacts': n_non_tip_contacts,
 
-        'reward_hybrid_dist': hb_com_dist_rew,
-        'reward_hybrid_rot': hb_rot_rew,
+        'reward_rot': rot_rew,
         'reward_keypoint': kp_rew,
         'reward_angvel': av_rew,
         'reward_total': total_reward,
@@ -177,6 +172,7 @@ def compute_gaiting_reward(
         'penalty_hand_torque': torque_penalty,
         'penalty_hand_work': work_penalty,
 
+        'reward_com_dist': com_dist_rew,
         'penalty_obj_linvel': obj_linvel_penalty,
         'penalty_axis_cos_dist': axis_cos_dist,
     }

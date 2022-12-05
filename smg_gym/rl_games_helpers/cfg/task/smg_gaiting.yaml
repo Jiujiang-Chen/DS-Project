@@ -15,9 +15,9 @@ env:
   enable_debug_vis: True
 
   # env settings
-  obj_name: 'sphere'
+  # obj_name: 'sphere'
   # obj_name: 'box'
-  # obj_name: 'capsule'
+  obj_name: 'capsule'
   # obj_name: 'rand'
 
   rotateIncrementDegrees: 30
@@ -51,21 +51,21 @@ env:
   # precision grasp components
   require_contact: False
   lamda_good_contact: 0.0
-  lamda_bad_contact: 0.1
+  lamda_bad_contact: 0.3
+
+  # obj stability
+  lambda_com_dist: 0.0 # 10.0
+  lambda_linvel_penalty: 0.0 # 1.0
+  lambda_axis_cos_dist: 0.0 # 1.0
 
   # hand smoothness
-  lambda_pose_penalty: 0.0 # 0.3
+  lambda_pose_penalty: 0.2
   lambda_torque_penalty: 0.0
   lambda_work_penalty: 0.0
 
-  # obj smoothness
-  lambda_linvel_penalty: 0.0
-  lambda_axis_cos_dist: 0.0
-
-  # hybrid reward params
-  lambda_hb_dist: 0.0 # 0.1
-  lambda_hb_rot: 0.0 # 0.01
-  hb_rot_eps: 0.0 # 0.1
+  # rot reward params
+  lambda_rot: 0.0 # 0.01
+  rot_eps: 0.0 # 0.1
 
   # keypoint reward params
   lambda_kp: 1.0
@@ -84,8 +84,8 @@ rand_params:
   rand_obj_scale: False
   rand_pivot_pos: False
   # rand_pivot_axel: 'full_rand'
-  # rand_pivot_axel: 'cardinal'
-  rand_pivot_axel: 'none'
+  rand_pivot_axel: 'cardinal'
+  # rand_pivot_axel: 'none'
 
 sim:
   dt: 0.016667
@@ -143,20 +143,20 @@ enabled_obs:
     object_kps: True
     object_linvel: False
     object_angvel: False
-    goal_pos: False
+    goal_pos: True
     goal_orn: True
     goal_kps: True
     active_quat: True
 
     # task specific conditioning
-    pivot_axel_vec: False
+    pivot_axel_vec: True
     pivot_axel_pos: False
 
 enabled_states:
     # proprio
     joint_pos: True
-    joint_vel: True
-    joint_eff: True
+    joint_vel: False
+    joint_eff: False
     fingertip_pos: True
     fingertip_orn: True
     latest_action: True
@@ -179,8 +179,8 @@ enabled_states:
     object_pos: True
     object_orn: True
     object_kps: True
-    object_linvel: True
-    object_angvel: True
+    object_linvel: False
+    object_angvel: False
     goal_pos: True
     goal_orn: True
     goal_kps: True
@@ -188,7 +188,7 @@ enabled_states:
 
     # task specific conditioning
     pivot_axel_vec: True
-    pivot_axel_pos: True
+    pivot_axel_pos: False
 
 domain_randomization:
   randomize: False

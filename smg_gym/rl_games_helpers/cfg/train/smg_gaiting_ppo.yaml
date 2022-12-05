@@ -88,7 +88,7 @@ params:
     #   minibatch_size: ${..num_actors}
     #   mini_epochs: ${..mini_epochs}
     #   learning_rate: 0.0005
-    #   lr_schedule: linear
+    #   lr_schedule: adaptive
     #   schedule_type: standard
     #   kl_threshold: 0.016
     #   clip_value: true
