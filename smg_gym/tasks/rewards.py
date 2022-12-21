@@ -8,7 +8,7 @@ from smg_gym.utils.torch_jit_utils import lgsk_kernel
 
 
 @torch.jit.script
-def compute_gaiting_reward(
+def compute_reward(
     # standard
     rew_buf: torch.Tensor,
     reset_buf: torch.Tensor,

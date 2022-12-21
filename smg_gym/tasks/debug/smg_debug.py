@@ -25,20 +25,7 @@ class SMGDebug(BaseShadowModularGrasper):
         if cfg["asymmetric_obs"]:
             cfg["env"]["numStates"] = self.calculate_buffer_size(cfg["enabled_states"])
 
-        cfg["env"]["numActions"] = 9
-
-        # reward / termination vars
-        self.reward_type = cfg["env"]["reward_type"]
-        self.max_episode_length = cfg["env"]["episode_length"]
-
-        if self.reward_type not in ["hybrid", "keypoint"]:
-            raise ValueError('Incorrect reward mode specified.')
-
-        # randomisation params
-        self.randomize = cfg["rand_params"]["randomize"]
-        self.rand_hand_joints = cfg["rand_params"]["rand_hand_joints"]
-        self.rand_obj_init_orn = cfg["rand_params"]["rand_obj_init_orn"]
-        self.rand_obj_scale = cfg["rand_params"]["rand_obj_scale"]
+        cfg["env"]["numActions"] = self._dims.ActionDim.value
 
         super(SMGDebug, self).__init__(
             cfg,

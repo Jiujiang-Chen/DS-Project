@@ -89,6 +89,9 @@ class BaseShadowModularGrasper(VecTask):
         self.env_spacing = cfg["env"]["env_spacing"]
         self.obj_name = cfg["env"]["obj_name"]
 
+        # termination vars
+        self.max_episode_length = cfg["env"]["episode_length"]
+
         # contact sensing
         self.enable_dof_force_sensors = cfg["env"]["enable_dof_force_sensors"]
         self.contact_sensor_modality = cfg["env"]["contact_sensor_modality"]
@@ -1084,57 +1087,57 @@ class BaseShadowModularGrasper(VecTask):
 
         buf_size = 0
 
-        if buf_cfg["joint_pos"]:
+        if "joint_pos" in buf_cfg.keys() and buf_cfg["joint_pos"]:
             buf_size += self._dims.JointPositionDim.value
-        if buf_cfg["joint_vel"]:
+        if "joint_vel" in buf_cfg.keys() and buf_cfg["joint_vel"]:
             buf_size += self._dims.JointVelocityDim.value
-        if buf_cfg["joint_eff"]:
+        if "joint_eff" in buf_cfg.keys() and buf_cfg["joint_eff"]:
             buf_size += self._dims.JointTorqueDim.value
-        if buf_cfg["fingertip_pos"]:
+        if "fingertip_pos" in buf_cfg.keys() and buf_cfg["fingertip_pos"]:
             buf_size += self._dims.FingertipPosDim.value
-        if buf_cfg["fingertip_orn"]:
+        if "fingertip_orn" in buf_cfg.keys() and buf_cfg["fingertip_orn"]:
             buf_size += self._dims.FingertipOrnDim.value
-        if buf_cfg["latest_action"]:
+        if "latest_action" in buf_cfg.keys() and buf_cfg["latest_action"]:
             buf_size += self._dims.ActionDim.value
-        if buf_cfg["prev_action"]:
+        if "prev_action" in buf_cfg.keys() and buf_cfg["prev_action"]:
             buf_size += self._dims.ActionDim.value
-        if buf_cfg["target_joint_pos"]:
+        if "target_joint_pos" in buf_cfg.keys() and buf_cfg["target_joint_pos"]:
             buf_size += self._dims.JointPositionDim.value
-        if buf_cfg["bool_tip_contacts"]:
+        if "bool_tip_contacts" in buf_cfg.keys() and buf_cfg["bool_tip_contacts"]:
             buf_size += self._dims.NumFingers.value
-        if buf_cfg["net_tip_contact_forces"]:
+        if "net_tip_contact_forces" in buf_cfg.keys() and buf_cfg["net_tip_contact_forces"]:
             buf_size += self._dims.FingerContactForceDim.value
-        if buf_cfg["ft_sensor_contact_forces"]:
+        if "ft_sensor_contact_forces" in buf_cfg.keys() and buf_cfg["ft_sensor_contact_forces"]:
             buf_size += self._dims.FingerContactForceDim.value
-        if buf_cfg["ft_sensor_contact_torques"]:
+        if "ft_sensor_contact_torques" in buf_cfg.keys() and buf_cfg["ft_sensor_contact_torques"]:
             buf_size += self._dims.FingerContactTorqueDim.value
-        if buf_cfg["tip_contact_positions"]:
+        if "tip_contact_positions" in buf_cfg.keys() and buf_cfg["tip_contact_positions"]:
             buf_size += self._dims.FingertipPosDim.value
-        if buf_cfg["tip_contact_normals"]:
+        if "tip_contact_normals" in buf_cfg.keys() and buf_cfg["tip_contact_normals"]:
             buf_size += self._dims.FingerContactForceDim.value
-        if buf_cfg["tip_contact_force_mags"]:
+        if "tip_contact_force_mags" in buf_cfg.keys() and buf_cfg["tip_contact_force_mags"]:
             buf_size += self._dims.NumFingers.value
-        if buf_cfg["object_pos"]:
+        if "object_pos" in buf_cfg.keys() and buf_cfg["object_pos"]:
             buf_size += self._dims.PosDim.value
-        if buf_cfg["object_orn"]:
+        if "object_orn" in buf_cfg.keys() and buf_cfg["object_orn"]:
             buf_size += self._dims.OrnDim.value
-        if buf_cfg["object_kps"]:
+        if "object_kps" in buf_cfg.keys() and buf_cfg["object_kps"]:
             buf_size += self._dims.KeypointPosDim.value
-        if buf_cfg["object_linvel"]:
+        if "object_linvel" in buf_cfg.keys() and buf_cfg["object_linvel"]:
             buf_size += self._dims.LinearVelocityDim.value
-        if buf_cfg["object_angvel"]:
+        if "object_angvel" in buf_cfg.keys() and buf_cfg["object_angvel"]:
             buf_size += self._dims.AngularVelocityDim.value
-        if buf_cfg["goal_pos"]:
+        if "goal_pos" in buf_cfg.keys() and buf_cfg["goal_pos"]:
             buf_size += self._dims.PosDim.value
-        if buf_cfg["goal_orn"]:
+        if "goal_orn" in buf_cfg.keys() and buf_cfg["goal_orn"]:
             buf_size += self._dims.OrnDim.value
-        if buf_cfg["goal_kps"]:
+        if "goal_kps" in buf_cfg.keys() and buf_cfg["goal_kps"]:
             buf_size += self._dims.KeypointPosDim.value
-        if buf_cfg["active_quat"]:
+        if "active_quat" in buf_cfg.keys() and buf_cfg["active_quat"]:
             buf_size += self._dims.OrnDim.value
-        if buf_cfg["pivot_axel_vec"]:
+        if "pivot_axel_vec" in buf_cfg.keys() and buf_cfg["pivot_axel_vec"]:
             buf_size += self._dims.VecDim.value
-        if buf_cfg["pivot_axel_pos"]:
+        if "pivot_axel_pos" in buf_cfg.keys() and buf_cfg["pivot_axel_pos"]:
             buf_size += self._dims.PosDim.value
 
         return buf_size
@@ -1157,12 +1160,6 @@ class BaseShadowModularGrasper(VecTask):
                     lower=self._states_scale.low,
                     upper=self._states_scale.high
                 )
-
-    def compute_reward_and_termination(self):
-        """
-        Calculate the reward.
-        """
-        pass
 
     def reset_hand(self, env_ids_for_reset):
         """
@@ -1529,13 +1526,6 @@ class BaseShadowModularGrasper(VecTask):
          self.tip_object_contacts,
          self.n_tip_contacts,
          self.n_non_tip_contacts) = self.get_fingertip_contacts()
-
-        # print('')
-        # print('force sensor contact')
-        # print(torch.norm(self.force_sensor_tensor[:, :, 0:3], p=2, dim=2))
-        #
-        # print('Net contact')
-        # print(torch.norm(self.net_tip_contact_forces, p=2, dim=2))
 
         # get tcp positions
         fingertip_states = self.rigid_body_tensor[:, self.fingertip_tcp_body_idxs, :]

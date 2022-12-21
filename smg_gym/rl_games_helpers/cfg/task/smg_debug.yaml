@@ -1,194 +1,117 @@
-# used to create the object
-name: smg_debug
+params:
+  seed: ${...seed}
 
-physics_engine: ${..physics_engine}
+  algo:
+    name: a2c_continuous
 
-# if given, will override the device setting in gym.
-env:
-  num_envs: 1
-  # num_envs: 2
-  # num_envs: 4096
-  # num_envs: 8192
-  # num_envs: 16384
+  model:
+    name: continuous_a2c_logstd
 
-  env_spacing: 0.5
-  enable_debug_vis: True
+  network:
+    name: actor_critic
+    separate: False
+    space:
+      continuous:
+        mu_activation: None
+        sigma_activation: None
+        mu_init:
+          name: default
+        sigma_init:
+          name: const_initializer
+          val: 0
+        fixed_sigma: True
+    mlp:
+      units: [512, 512, 256, 128]
+      # units:  [256, 256, 128, 128]
+      activation: elu
+      d2rl: False
+      initializer:
+        name: default
+      regularizer:
+        name: None
 
-  # env settings
-  obj_name: 'sphere'
-  # obj_name: 'box'
-  # obj_name: 'rand'
+    # rnn:
+    #   name: lstm
+    #   units: 256
+    #   layers: 1
+    #   before_mlp: False
+    #   concat_input: True
+    #   layer_norm: True
 
-  rotateIncrementDegrees: 30
-  default_pivot_axel: [0.0, 0.0, 1.0]
-  clip_observations: 5.0
-  clip_actions: 1.0
+  config:
+    name: smg_debug
+    full_experiment_name: ${.name}
+    env_name: rlgpu
+    multi_gpu: False
+    ppo: True
+    mixed_precision: False
+    normalize_input: True
+    normalize_value: True
+    value_bootstrap: True
+    num_actors: ${....task.env.num_envs}
+    reward_shaper:
+      scale_value: 1.0
+    normalize_advantage: True
+    gamma: 0.99
+    tau: 0.95
+    learning_rate: 5e-4
+    lr_schedule: adaptive
+    schedule_type: standard
+    kl_threshold: 0.016
+    score_to_win: 100000
+    max_epochs: ${resolve_default:400,${....max_iterations}}
+    use_diagnostics: True
+    save_best_after: 100
+    save_frequency: 250
+    entropy_coef: 0.0
+    truncate_grads: True
+    grad_norm: 1.0
+    e_clip: 0.2
 
-  enable_dof_force_sensors: True
-  contact_sensor_modality: 'ft_sensor'
-  # contact_sensor_modality: 'rich_cpu'
+    # horizon_length: 1024
+    # minibatch_size: 256
 
-  # action settings
-  actions_scale: 1.0
-  actions_ema: 0.75
-  control_frequency_inv: 3
-  use_sim_pd_control: True
-  command_mode: 'position'
-  # command_mode: 'velocity'
-  # command_mode: 'torque'
+    # horizon_length: 8
+    # minibatch_size: 16384
 
-  # shared reward/termination
-  episode_length: 1000
-  require_contact: True
-  contact_reward_scale: 0.0
-  action_penalty_scale: 0.0
-  av_factor: 0.01
-  reach_goal_bonus: 250
-  fall_reset_dist: 0.15
-  fall_penalty: 0.0
+    horizon_length: 32
+    minibatch_size: 32768
 
-  # reward_type: "hybrid"
-  dist_reward_scale: -10.0
-  rot_reward_scale: 1.0
-  rot_success_tolerance: 0.1
-  rot_eps: 0.1
+    mini_epochs: 5
+    critic_coef: 4
+    clip_value: True
+    seq_len: 4
+    bounds_loss_coef: 0.0001
 
-  reward_type: "keypoint"
-  kp_success_tolerance: 0.02
-  lgsk_scale: 50.0
-  lgsk_eps: 2.0
-  kp_dist_scale: 10.0
+    # use_experimental_cv: true
+    # central_value_config:
+    #   minibatch_size: ${..num_actors}
+    #   mini_epochs: ${..mini_epochs}
+    #   learning_rate: 0.0005
+    #   lr_schedule: adaptive
+    #   schedule_type: standard
+    #   kl_threshold: 0.016
+    #   clip_value: true
+    #   normalize_input: true
+    #   truncate_grads: true
+    #   network:
+    #     name: actor_critic
+    #     central_value: true
+    #     mlp:
+    #       units: [512, 512, 256, 128]
+    #       activation: elu
+    #       d2rl: false
+    #       initializer:
+    #         name: default
+    #       regularizer:
+    #         name: None
 
-rand_params:
-  randomize: False
-  rand_hand_joints: False
-  rand_obj_init_orn: False
-  rand_obj_scale: False
 
-normalize_obs: False
-asymmetric_obs: True
+    print_stats: False
+    progress_bar: True
 
-enabled_obs:
-
-    # proprio
-    joint_pos: True
-    joint_vel: False
-    joint_eff: False
-    fingertip_pos: True
-    fingertip_orn: True
-    latest_action: True
-
-    # default contacts
-    bool_tip_contacts: False
-    net_tip_contact_forces: False
-
-    # ft sensor contacts req
-    ft_sensor_contact_forces: False
-    ft_sensor_contact_torques: False
-
-    # rich contacts req
-    tip_contact_positions: False
-    tip_contact_normals: False
-    tip_contact_force_mags: False
-
-    # privaliged object
-    object_pos: False
-    object_orn: False
-    object_kps: False
-    object_linvel: False
-    object_angvel: False
-    goal_pos: False
-    goal_orn: False
-    goal_kps: False
-    active_quat: False
-
-    # task specific conditioning
-    pivot_axel_vec: True
-    pivot_axel_pos: False
-
-enabled_states:
-    # proprio
-    joint_pos: True
-    joint_vel: True
-    joint_eff: True
-    fingertip_pos: True
-    fingertip_orn: True
-    latest_action: True
-
-    # default contacts
-    bool_tip_contacts: True
-    net_tip_contact_forces: True
-
-    # ft sensor contacts req
-    ft_sensor_contact_forces: True
-    ft_sensor_contact_torques: True
-
-    # rich contacts req
-    tip_contact_positions: True
-    tip_contact_normals: True
-    tip_contact_force_mags: True
-
-    # privaliged object
-    object_pos: True
-    object_orn: True
-    object_kps: True
-    object_linvel: True
-    object_angvel: True
-    goal_pos: True
-    goal_orn: True
-    goal_kps: True
-    active_quat: True
-
-    # task specific conditioning
-    pivot_axel_vec: True
-    pivot_axel_pos: True
-
-sim:
-  dt: 0.016667 # 1/60
-  substeps: 2
-  up_axis: "z"
-  use_gpu_pipeline: ${eq:${...pipeline},"gpu"}
-  gravity: [0.0, 0.0, -9.81]
-  physx:
-    num_threads: ${....num_threads}
-    solver_type: ${....solver_type}
-    use_gpu: ${contains:"cuda",${....sim_device}}
-    num_position_iterations: 4
-    num_velocity_iterations: 0
-    max_gpu_contact_pairs: 8388608
-    contact_offset: 0.002
-    rest_offset: 0.0
-    bounce_threshold_velocity: 0.2
-    max_depenetration_velocity: 1000.0
-    default_buffer_size_multiplier: 5.0
-    contact_collection: 1
-
-domain_randomization:
-  randomize: False
-  dr_params:
-
-    frequency: 1000   # Define how many simulation steps between generating new randomizations
-
-    observations:
-      range: [0, .002] # range for the white noise
-      range_correlated: [0, .000 ] # range for correlated noise, refreshed with freq `frequency`
-      operation: "additive"
-      distribution: "gaussian"
-
-    actions:
-      range: [0., .01]
-      range_correlated: [0, .005] # range for correlated noise, refreshed with freq `frequency`
-      operation: "additive"
-      distribution: "gaussian"
-
-    sim_params:
-      gravity:
-        range: [0, 0.4]
-        operation: "additive"
-        distribution: "gaussian"
-        # schedule: "linear"  # "linear" will linearly interpolate between no rand and max rand
-        # schedule_steps: 40000
-
-    actor_params:
-      hand:
-        color: True
+    player:
+      #render: True
+      deterministic: True
+      games_num: 100000
+      print_stats: False
