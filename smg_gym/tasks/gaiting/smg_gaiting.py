@@ -37,6 +37,7 @@ class SMGGaiting(BaseGaiting):
             fingertip_pos: 9
             fingertip_orn: 12
             latest_action: 9
+            prev_action: 9
             bool_tip_contacts: 3
             tip_contact_forces: 9
             ft_sensor_contact_forces: 9
@@ -55,7 +56,7 @@ class SMGGaiting(BaseGaiting):
             active_quat: 4
             pivot_axel_vec: 3
             pivot_axel_pos: 3
-        max_total = 147
+        max_total = 156
         """
 
         cfg["env"]["numObservations"] = self.calculate_buffer_size(cfg["enabled_obs"])

@@ -69,7 +69,7 @@ object_properties = {
 }
 
 robot_dof_properties = {
-    "max_position_delta_rad": 0.025,
+    "max_position_delta_rad": np.deg2rad(15.0),
     "max_velocity_radps": np.deg2rad(45.0),
     "max_torque_Nm": 0.4,
     "friction": [0.0, 0.0, 0.0] * dims.NumFingers.value,
@@ -122,6 +122,10 @@ robot_limits = {
         high=np.full(dims.VelocityDim.value, 0.25, dtype=np.float32),
     ),
     "latest_action": SimpleNamespace(
+        low=np.full(dims.JointPositionDim.value, -robot_dof_properties["max_position_delta_rad"], dtype=np.float32),
+        high=np.full(dims.JointPositionDim.value, robot_dof_properties["max_position_delta_rad"], dtype=np.float32),
+    ),
+    "prev_action": SimpleNamespace(
         low=np.full(dims.JointPositionDim.value, -robot_dof_properties["max_position_delta_rad"], dtype=np.float32),
         high=np.full(dims.JointPositionDim.value, robot_dof_properties["max_position_delta_rad"], dtype=np.float32),
     ),

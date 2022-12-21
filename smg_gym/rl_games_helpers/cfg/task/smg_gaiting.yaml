@@ -15,9 +15,9 @@ env:
   enable_debug_vis: True
 
   # env settings
-  # obj_name: 'sphere'
+  obj_name: 'sphere'
   # obj_name: 'box'
-  obj_name: 'capsule'
+  # obj_name: 'capsule'
   # obj_name: 'rand'
 
   rotateIncrementDegrees: 30
@@ -31,7 +31,8 @@ env:
   # contact_sensor_modality: 'rich_cpu'
 
   # action settings
-  actions_scale: 0.01
+  actions_scale: 1.0
+  actions_ema: 0.75
   control_frequency_inv: 3
   use_sim_pd_control: True
   command_mode: 'position'
@@ -84,8 +85,8 @@ rand_params:
   rand_obj_scale: False
   rand_pivot_pos: False
   # rand_pivot_axel: 'full_rand'
-  rand_pivot_axel: 'cardinal'
-  # rand_pivot_axel: 'none'
+  # rand_pivot_axel: 'cardinal'
+  rand_pivot_axel: 'none'
 
 sim:
   dt: 0.016667
@@ -122,6 +123,7 @@ enabled_obs:
     fingertip_pos: True
     fingertip_orn: True
     latest_action: True
+    prev_action: True
     target_joint_pos: True
 
     # default contacts
@@ -160,6 +162,7 @@ enabled_states:
     fingertip_pos: True
     fingertip_orn: True
     latest_action: True
+    prev_action: True
     target_joint_pos: True
 
     # default contacts

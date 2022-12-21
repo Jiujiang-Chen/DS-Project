@@ -29,8 +29,9 @@ env:
   # contact_sensor_modality: 'rich_cpu'
 
   # action settings
-  actions_scale: 0.01
-  control_frequency_inv: 3  # 20hz
+  actions_scale: 1.0
+  actions_ema: 0.75
+  control_frequency_inv: 3
   use_sim_pd_control: True
   command_mode: 'position'
   # command_mode: 'velocity'

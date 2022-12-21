@@ -1,4 +1,3 @@
-import time
 from typing import Deque
 import numpy as np
 import torch
@@ -97,6 +96,7 @@ class BaseShadowModularGrasper(VecTask):
         # action params
         self.use_sim_pd_control = cfg["env"]["use_sim_pd_control"]
         self.actions_scale = cfg["env"]["actions_scale"]
+        self.actions_ema = cfg["env"]["actions_ema"]
 
         # shared task randomisation params
         self.randomize = cfg["rand_params"]["randomize"]
@@ -956,6 +956,12 @@ class BaseShadowModularGrasper(VecTask):
             end_offset = start_offset + self._dims.ActionDim.value
             buf[:, start_offset:end_offset] = self.action_buf
 
+        # previous actions
+        if buf_cfg["prev_action"]:
+            start_offset = end_offset
+            end_offset = start_offset + self._dims.ActionDim.value
+            buf[:, start_offset:end_offset] = self.prev_action_buf
+
         # target joint position
         if buf_cfg["target_joint_pos"]:
             start_offset = end_offset
@@ -1089,6 +1095,8 @@ class BaseShadowModularGrasper(VecTask):
         if buf_cfg["fingertip_orn"]:
             buf_size += self._dims.FingertipOrnDim.value
         if buf_cfg["latest_action"]:
+            buf_size += self._dims.ActionDim.value
+        if buf_cfg["prev_action"]:
             buf_size += self._dims.ActionDim.value
         if buf_cfg["target_joint_pos"]:
             buf_size += self._dims.JointPositionDim.value
@@ -1324,6 +1332,7 @@ class BaseShadowModularGrasper(VecTask):
         # reset buffers
         self.progress_buf[env_ids_for_reset] = 0
         self.action_buf[env_ids_for_reset] = 0
+        self.prev_action_buf[env_ids_for_reset] = 0
         self.reset_buf[env_ids_for_reset] = 0
         self.successes[env_ids_for_reset] = 0
 
@@ -1350,7 +1359,10 @@ class BaseShadowModularGrasper(VecTask):
         if self.cfg["env"]["command_mode"] == 'position':
 
             # increment actions in buffer with new actions
-            self.action_buf += actions.clone().to(self.device) * self.actions_scale
+            scaled_actions = actions.clone().to(self.device) * self.actions_scale
+            self.action_buf = self.actions_ema * scaled_actions + \
+                (1-self.actions_ema) * self.prev_action_buf
+            self.prev_action_buf = self.action_buf.clone()
 
             # limit to max change per step
             self.action_buf = torch.clamp(
@@ -1373,8 +1385,12 @@ class BaseShadowModularGrasper(VecTask):
             self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(self.target_dof_pos))
 
         elif self.cfg["env"]["command_mode"] == 'velocity':
+
             # increment actions in buffer with new actions
-            self.action_buf += actions.clone().to(self.device) * self.actions_scale
+            scaled_actions = actions.clone().to(self.device) * self.actions_scale
+            self.action_buf = self.actions_ema * scaled_actions + \
+                (1-self.actions_ema) * self.prev_action_buf
+            self.prev_action_buf = self.action_buf.clone()
 
             # limit to max change per step
             self.action_buf = torch.clamp(
@@ -1423,7 +1439,10 @@ class BaseShadowModularGrasper(VecTask):
         if self.cfg["env"]["command_mode"] == 'position':
 
             # increment actions in buffer with new actions
-            self.action_buf += actions.clone().to(self.device) * self.actions_scale
+            scaled_actions = actions.clone().to(self.device) * self.actions_scale
+            self.action_buf = self.actions_ema * scaled_actions + \
+                (1-self.actions_ema) * self.prev_action_buf
+            self.prev_action_buf = self.action_buf.clone()
 
             # limit to max change per step
             self.action_buf = torch.clamp(
@@ -1451,7 +1470,10 @@ class BaseShadowModularGrasper(VecTask):
         elif self.cfg["env"]["command_mode"] == 'velocity':
 
             # increment actions in buffer with new actions
-            self.action_buf += actions.clone().to(self.device) * self.actions_scale
+            scaled_actions = actions.clone().to(self.device) * self.actions_scale
+            self.action_buf = self.actions_ema * scaled_actions + \
+                (1-self.actions_ema) * self.prev_action_buf
+            self.prev_action_buf = self.action_buf.clone()
 
             # limit to max change per step
             self.action_buf = torch.clamp(
