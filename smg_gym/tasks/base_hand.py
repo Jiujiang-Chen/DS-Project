@@ -1,4 +1,5 @@
 from typing import Deque
+import os
 import numpy as np
 import torch
 from collections import deque
@@ -387,6 +388,17 @@ class BaseShadowModularGrasper(VecTask):
         self.init_dof_pos = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
         self.init_dof_vel = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
         self.init_dof_eff = torch.zeros((self.num_envs, self.n_hand_dofs), dtype=torch.float, device=self.device)
+
+        # load saved grasps from cache
+        if self.cfg['env']['use_cached_grasps']:
+            save_file = os.path.join(
+                os.path.dirname(__file__),
+                '../saved_grasps/',
+                f'{self.obj_name}_grasps.npy'
+            )
+            self.loaded_grasping_states = torch.from_numpy(np.load(
+                save_file
+            )).float().to(self.device)
 
     def _choose_env_object(self):
 
@@ -1167,18 +1179,22 @@ class BaseShadowModularGrasper(VecTask):
         """
         num_envs_to_reset = len(env_ids_for_reset)
 
-        # add randomisation to the joint poses
-        if self.randomize and self.rand_hand_joints:
-            # sample uniform random from (-1, 1)
-            rand_stddev = torch_rand_float(-1.0, 1.0, (num_envs_to_reset, self.n_hand_dofs), device=self.device)
-
-            # add noise to DOF positions
-            delta_max = self._robot_limits["joint_pos"].rand_uplim - self._robot_limits["joint_pos"].default
-            delta_min = self._robot_limits["joint_pos"].rand_lolim - self._robot_limits["joint_pos"].default
-            target_dof_pos = self._robot_limits["joint_pos"].default + \
-                delta_min + (delta_max - delta_min) * rand_stddev
+        if self.cfg["env"]["use_cached_grasps"] and hasattr(self, 'sampled_pose_idx'):
+            # randomly select from loaded grasps
+            target_dof_pos = self.loaded_grasping_states[self.sampled_pose_idx].clone()[:, :self._dims.JointPositionDim.value]
         else:
-            target_dof_pos = self._robot_limits["joint_pos"].default
+            # add randomisation to the joint poses
+            if self.randomize and self.rand_hand_joints:
+                # sample uniform random from (-1, 1)
+                rand_stddev = torch_rand_float(-1.0, 1.0, (num_envs_to_reset, self.n_hand_dofs), device=self.device)
+
+                # add noise to DOF positions
+                delta_max = self._robot_limits["joint_pos"].rand_uplim - self._robot_limits["joint_pos"].default
+                delta_min = self._robot_limits["joint_pos"].rand_lolim - self._robot_limits["joint_pos"].default
+                target_dof_pos = self._robot_limits["joint_pos"].default + \
+                    delta_min + (delta_max - delta_min) * rand_stddev
+            else:
+                target_dof_pos = self._robot_limits["joint_pos"].default
 
         # get default velocity and effort
         target_dof_vel = self._robot_limits["joint_vel"].default
@@ -1241,22 +1257,34 @@ class BaseShadowModularGrasper(VecTask):
 
         num_envs_to_reset = len(env_ids_for_reset)
 
-        # set obj pos and vel to default
-        object_pos = to_torch(self.default_obj_pos, dtype=torch.float, device=self.device).repeat((num_envs_to_reset, 1))
-        object_linvel = to_torch(self.default_obj_linvel, dtype=torch.float, device=self.device).repeat((num_envs_to_reset, 1))
-        object_angvel = to_torch(self.default_obj_angvel, dtype=torch.float, device=self.device).repeat((num_envs_to_reset, 1))
-
-        # randomise object rotation
-        if self.randomize and self.rand_obj_init_orn:
-            rand_floats = torch_rand_float(-1.0, 1.0, (len(env_ids_for_reset), 2), device=self.device)
-            object_orn = randomize_rotation(
-                rand_floats[:, 0],
-                rand_floats[:, 1],
-                self.x_unit_tensor[env_ids_for_reset],
-                self.y_unit_tensor[env_ids_for_reset]
-            )
+        if self.cfg["env"]["use_cached_grasps"] and hasattr(self, 'sampled_pose_idx'):
+            # randomly select from loaded grasps
+            object_pose = self.loaded_grasping_states[self.sampled_pose_idx].clone(
+            )[:, self._dims.JointPositionDim.value:self._dims.JointPositionDim.value+self._dims.PoseDim.value]
+            object_pos = object_pose[:, 0:3]
+            object_orn = object_pose[:, 3:7]
         else:
-            object_orn = to_torch(self.default_obj_orn, dtype=torch.float, device=self.device).repeat((num_envs_to_reset, 1))
+
+            # set obj pos and vel to default
+            object_pos = to_torch(self.default_obj_pos, dtype=torch.float, device=self.device).repeat((num_envs_to_reset, 1))
+
+            # randomise object rotation
+            if self.randomize and self.rand_obj_init_orn:
+                rand_floats = torch_rand_float(-1.0, 1.0, (len(env_ids_for_reset), 2), device=self.device)
+                object_orn = randomize_rotation(
+                    rand_floats[:, 0],
+                    rand_floats[:, 1],
+                    self.x_unit_tensor[env_ids_for_reset],
+                    self.y_unit_tensor[env_ids_for_reset]
+                )
+            else:
+                object_orn = to_torch(self.default_obj_orn, dtype=torch.float,
+                                      device=self.device).repeat((num_envs_to_reset, 1))
+
+        object_linvel = to_torch(self.default_obj_linvel, dtype=torch.float,
+                                 device=self.device).repeat((num_envs_to_reset, 1))
+        object_angvel = to_torch(self.default_obj_angvel, dtype=torch.float,
+                                 device=self.device).repeat((num_envs_to_reset, 1))
 
         self.root_state_tensor[self.obj_indices[env_ids_for_reset], 0:3] = object_pos
         self.root_state_tensor[self.obj_indices[env_ids_for_reset], 3:7] = object_orn
@@ -1293,6 +1321,10 @@ class BaseShadowModularGrasper(VecTask):
 
         env_ids_for_reset = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
         goal_env_ids_for_reset = self.reset_goal_buf.nonzero(as_tuple=False).squeeze(-1)
+
+        # randomly select from loaded grasps
+        if self.cfg["env"]["use_cached_grasps"]:
+            self.sampled_pose_idx = np.random.randint(self.loaded_grasping_states.shape[0], size=len(env_ids_for_reset))
 
         actor_root_state_reset_indices = []
 

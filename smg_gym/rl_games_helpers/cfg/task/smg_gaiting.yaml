@@ -20,6 +20,8 @@ env:
   # obj_name: 'capsule'
   # obj_name: 'rand'
 
+  use_cached_grasps: True
+
   rotateIncrementDegrees: 30
   default_pivot_axel: [0.0, 0.0, 1.0]
   clip_observations: 5.0
@@ -41,7 +43,7 @@ env:
 
   # shared reward/termination
   episode_length: 200
-  fall_reset_dist: 0.05
+  fall_reset_dist: 0.1
   success_tolerance: 0.015
   av_factor: 0.01
 

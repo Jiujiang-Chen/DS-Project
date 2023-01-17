@@ -96,8 +96,10 @@ robot_limits = {
         low=np.array([-0.785, -1.396, -1.047] * dims.NumFingers.value, dtype=np.float32),
         high=np.array([0.785, 1.047, 1.396] * dims.NumFingers.value, dtype=np.float32),
         default=np.array([-0.0, 0.45, -0.55] * dims.NumFingers.value, dtype=np.float32),
-        rand_lolim=np.array([-0.3, 0.45, -0.55] * dims.NumFingers.value, dtype=np.float32),
-        rand_uplim=np.array([0.3, 0.45, -0.55] * dims.NumFingers.value, dtype=np.float32),
+        # rand_lolim=np.array([-0.3, 0.45, -0.55] * dims.NumFingers.value, dtype=np.float32),
+        # rand_uplim=np.array([0.3, 0.45, -0.55] * dims.NumFingers.value, dtype=np.float32),
+        rand_lolim=np.array([-0.5, 0.4, -0.85] * dims.NumFingers.value, dtype=np.float32),
+        rand_uplim=np.array([0.5, 0.6, -0.25] * dims.NumFingers.value, dtype=np.float32),
     ),
     "joint_vel": SimpleNamespace(
         low=np.full(dims.JointVelocityDim.value, -robot_dof_properties["max_velocity_radps"], dtype=np.float32),

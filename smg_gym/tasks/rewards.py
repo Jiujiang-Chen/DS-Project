@@ -178,3 +178,52 @@ def compute_reward(
     }
 
     return total_reward, resets, goal_resets, successes, cons_successes, info
+
+
+@torch.jit.script
+def compute_stable_grasp(
+    # standard
+    rew_buf: torch.Tensor,
+    reset_buf: torch.Tensor,
+    progress_buf: torch.Tensor,
+    reset_goal_buf: torch.Tensor,
+    successes: torch.Tensor,
+    consecutive_successes: torch.Tensor,
+
+    # termination and success criteria
+    max_episode_length: float,
+    fall_reset_dist: float,
+
+    # stable grasp components
+    n_tip_contacts: torch.Tensor,
+    n_non_tip_contacts: torch.Tensor,
+    obj_base_pos: torch.Tensor,
+    goal_base_pos: torch.Tensor,
+
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
+
+    total_reward = torch.zeros_like(rew_buf)
+    resets = torch.zeros_like(reset_buf)
+    goal_resets = torch.zeros_like(reset_buf)
+    successes = torch.zeros_like(successes)
+    cons_successes = torch.zeros_like(consecutive_successes)
+
+    # com dist to detect fall
+    com_dist_rew = -torch.norm(obj_base_pos - goal_base_pos, p=2, dim=-1)
+    resets = torch.where(com_dist_rew >= fall_reset_dist, torch.ones_like(reset_buf), resets)
+
+    # number of contacts to detect grasp
+    resets = torch.where(n_tip_contacts < 1, torch.ones_like(reset_buf), resets)
+
+    # number of non-tip contacts to detect bad grasp
+    resets = torch.where(n_non_tip_contacts >= 1, torch.ones_like(reset_buf), resets)
+
+    # max ep length is reached
+    resets = torch.where(progress_buf >= max_episode_length, torch.ones_like(resets), resets)
+
+    info: Dict[str, torch.Tensor] = {
+        'num_tip_contacts': n_tip_contacts,
+        'num_non_tip_contacts': n_non_tip_contacts,
+    }
+
+    return total_reward, resets, goal_resets, successes, cons_successes, info

@@ -20,6 +20,7 @@ env:
   # obj_name: 'capsule'
   # obj_name: 'rand'
 
+  use_cached_grasps: False
   clip_observations: 5.0
   clip_actions: 1.0
 

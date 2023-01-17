@@ -39,7 +39,7 @@ from hydra.utils import to_absolute_path
 
 from isaacgymenvs.utils.reformat import omegaconf_to_dict, print_dict
 from isaacgymenvs.utils.rlgames_utils import RLGPUEnv, RLGPUAlgoObserver
-from isaacgymenvs.utils.utils import set_np_formatting, set_seed
+from isaacgymenvs.utils.utils import set_seed
 
 from rl_games.common import env_configurations, vecenv
 from rl_games.torch_runner import Runner
@@ -64,9 +64,6 @@ def launch_rlg_hydra(cfg: DictConfig):
 
     cfg_dict = omegaconf_to_dict(cfg)
     print_dict(cfg_dict)
-
-    # set numpy formatting for printing only
-    set_np_formatting()
 
     # sets seed. if seed is -1 will pick a random one
     cfg.seed = set_seed(cfg.seed, torch_deterministic=cfg.torch_deterministic)

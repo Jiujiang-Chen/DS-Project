@@ -218,6 +218,10 @@ class SMGGaiting(BaseShadowModularGrasper):
         env_ids_for_reset = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
         goal_env_ids_for_reset = self.reset_goal_buf.nonzero(as_tuple=False).squeeze(-1)
 
+        # randomly select from loaded grasps
+        if self.cfg["env"]["use_cached_grasps"]:
+            self.sampled_pose_idx = np.random.randint(self.loaded_grasping_states.shape[0], size=len(env_ids_for_reset))
+
         actor_root_state_reset_indices = []
 
         # nothing to reset
