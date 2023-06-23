@@ -3,6 +3,7 @@ import numpy as np
 import random
 from isaacgym import gymutil
 from isaacgym import gymapi
+from isaacgym.torch_utils import *
 import inspect
 
 
@@ -71,7 +72,7 @@ plane_params.restitution = 0
 gym.add_ground(sim, plane_params)
 
 # set up the env grid
-num_envs = 4
+num_envs = 8
 grid_size = int(np.sqrt(num_envs))
 spacing = 0.5
 env_lower = gymapi.Vec3(-spacing, -spacing, 0.0)
@@ -82,8 +83,8 @@ env_upper = gymapi.Vec3(spacing, spacing, spacing)
 
 def load_hand():
 
-    asset_root = add_assets_path('robot_assets/smg_minitip_4_fingers')
-    asset_file = "smg_tactip.urdf"
+    asset_root = add_assets_path('robot_assets/allegro_hora')
+    asset_file = "allegro_digitac.urdf"
 
     asset_options = gymapi.AssetOptions()
     asset_options.disable_gravity = True
@@ -97,6 +98,7 @@ def load_hand():
     asset_options.convex_decomposition_from_submeshes = False
     asset_options.vhacd_enabled = False
     asset_options.flip_visual_attachments = False
+    asset_options.use_physx_armature = True
 
     hand_asset = gym.load_asset(sim, asset_root, asset_file, asset_options)
 
@@ -123,28 +125,35 @@ def load_objects():
     return object_assets
 
 
+# control_joint_names = [
+#     "SMG_F1J1", "SMG_F1J2", "SMG_F1J3",
+#     "SMG_F2J1", "SMG_F2J2", "SMG_F2J3",
+#     "SMG_F3J1", "SMG_F3J2", "SMG_F3J3",
+#     "SMG_F4J1", "SMG_F4J2", "SMG_F4J3",
+# ]
+
+# For allegro hand hora
 control_joint_names = [
-    "SMG_F1J1", "SMG_F1J2", "SMG_F1J3",
-    "SMG_F2J1", "SMG_F2J2", "SMG_F2J3",
-    "SMG_F3J1", "SMG_F3J2", "SMG_F3J3",
-    "SMG_F4J1", "SMG_F4J2", "SMG_F4J3",
+    "joint_0.0", "joint_1.0", "joint_2.0", "joint_3.0",         # Index 
+    "joint_4.0", "joint_5.0", "joint_6.0", "joint_7.0",         # Middle 
+    "joint_8.0", "joint_9.0", "joint_10.0", "joint_11.0",       # Pinky
+    "joint_12.0", "joint_13.0", "joint_14.0", "joint_15.0",     # Thumb
 ]
 
 num_control_dofs = len(control_joint_names)
 
 mins = {
-    "J1": -20.0*(np.pi/180),
-    "J2": -20.0*(np.pi/180),
-    "J3": -20.0*(np.pi/180),
-    "J4": -20.0*(np.pi/180),
+    "0": -20.0*(np.pi/180),
+    "1": -20.0*(np.pi/180),
+    "2": -20.0*(np.pi/180),
+    "3": -20.0*(np.pi/180),
 }
 maxs = {
-    "J1": 20.0*(np.pi/180),
-    "J2": 20.0*(np.pi/180),
-    "J3": 20.0*(np.pi/180),
-    "J4": 20.0*(np.pi/180),
+    "0": 20.0*(np.pi/180),
+    "1": 20.0*(np.pi/180),
+    "2": 20.0*(np.pi/180),
+    "3": 20.0*(np.pi/180),
 }
-
 
 def init_hand_joints(env, actor_handle):
 
@@ -152,7 +161,8 @@ def init_hand_joints(env, actor_handle):
     for control_joint in control_joint_names:
 
         # get rand state for init joint pos
-        joint_num = control_joint[-2:]
+        joint_num = str(int(float(control_joint[6:]) % 4))
+
         rand_pos = np.random.uniform(mins[joint_num], maxs[joint_num])
         init_joint_pos[control_joint] = rand_pos
 
@@ -171,12 +181,21 @@ def init_hand_joints(env, actor_handle):
 def add_hand_actor(env):
 
     pose = gymapi.Transform()
-    pose.p = gymapi.Vec3(0.0, 0.0, 0.025)
-    pose.r = gymapi.Quat(0, 0, 0, 1)
+    # pose.p = gymapi.Vec3(0.0, 0.0, 0.2)
+    # pose.r = gymapi.Quat(0, 0, 0, 1)
+
+    up_axis_idx = 2
+    pose.p = gymapi.Vec3(*get_axis_params(0.25, up_axis_idx))
+    pose.r = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), 0.0*np.pi) * gymapi.Quat.from_axis_angle(gymapi.Vec3(1, 0, 0), 0.5 * np.pi) * gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 0, 1), 0.5 * np.pi)
+
 
     num_hand_bodies = gym.get_asset_rigid_body_count(hand_asset)
     num_hand_shapes = gym.get_asset_rigid_shape_count(hand_asset)
     n_hand_dofs = gym.get_asset_dof_count(hand_asset)
+
+    # print("num of hand bodies, ", num_hand_bodies)
+    # print("num of hand shapes, ", num_hand_shapes)
+    # print("num of hand dofs, ", n_hand_dofs)
 
     gym.begin_aggregate(env, num_hand_bodies, num_hand_shapes, False)
 
@@ -204,8 +223,11 @@ def add_hand_actor(env):
 
 def add_object_actor(env):
     pose = gymapi.Transform()
-    pose.p = gymapi.Vec3(0.0, 0.0, 0.275)
-    pose.r = gymapi.Quat(0, 0, 0, 1)
+    # pose.p = gymapi.Vec3(0.0, 0.0, 0.275)
+    # pose.r = gymapi.Quat(0, 0, 0, 1)
+
+    pose.p = gymapi.Vec3(0.0, 0.005, 0.32)
+    pose.r = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), 0.0*np.pi) * gymapi.Quat.from_axis_angle(gymapi.Vec3(1, 0, 0), 0.5 * np.pi) * gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 0, 1), 0.5 * np.pi)
 
     object_asset = np.random.choice(object_assets)
     handle = gym.create_actor(env, object_asset, pose, "obj_actor_{}".format(i), -1, -1)
@@ -252,7 +274,8 @@ def pre_physics_step():
 
     for i in range(num_envs):
 
-        action = np.random.uniform(-act_lim, act_lim, size=[num_control_dofs])
+        # action = np.random.uniform(-act_lim, act_lim, size=[num_control_dofs])
+        action = np.zeros(num_control_dofs)
 
         current_joint_state = current_joint_states[i]
         targets = current_joint_state + dof_speed_scale * dt * action
@@ -274,10 +297,10 @@ def apply_grasp_action(current_joint_states):
     dt = sim_params.dt
 
     grasp_action = np.array([
-        0.0, act_lim, 0.0,
-        0.0, act_lim, 0.0,
-        0.0, act_lim, 0.0,
-        0.0, act_lim, 0.0
+        0.0, act_lim, 0.0, 0.0,
+        0.0, act_lim, 0.0, 0.0,
+        0.0, act_lim, 0.0, 0.0,
+        0.0, act_lim, 0.0, 0.0,
     ])
 
     for i in range(num_envs):
@@ -328,6 +351,7 @@ def initialise_contact(current_joint_states):
             break
 
         for i in update_envs:
+            # Disable gravity during grasping motion
             apply_gravity_compensation_object(envs[i], object_actor_handles[i])
             apply_grasp_action(current_joint_states)
 
@@ -422,6 +446,9 @@ while not gym.query_viewer_has_closed(viewer):
 
     # Get input actions from the viewer and handle them appropriately
     for evt in gym.query_viewer_action_events(viewer):
+        
+        if evt.value > 0:
+            print(evt.action)
 
         if evt.action == "reset" and evt.value > 0:
             current_joint_states = reset()
