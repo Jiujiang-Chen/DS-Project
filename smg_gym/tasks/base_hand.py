@@ -183,15 +183,18 @@ class BaseShadowModularGrasper(VecTask):
         self.root_state_tensor = gymtorch.wrap_tensor(actor_root_state_tensor).view(-1, 13)
 
         # create views of dof tensor
+        # Shape = (num_environments * num_hand_dof, 2)
+        # 2 -> position([0]), velocity([1])
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
         self.dof_pos = self.dof_state.view(self.num_envs, self.n_hand_dofs, 2)[..., 0]
         self.dof_vel = self.dof_state.view(self.num_envs, self.n_hand_dofs, 2)[..., 1]
 
         # create views of rigid body states
         # shape = (num_environments, num_bodies * 13)
+        # 13 -> position([0:3]), rotation([3:7]), linear velocity([7:10]), angular velocity([10:13])
         self.rigid_body_tensor = gymtorch.wrap_tensor(rigid_body_tensor).view(self.num_envs, self.n_env_bodies, 13)
 
-        # create views of contact_force tensor
+        # create views of contact_force tensor. Obtains the contact force for every rigid body
         # default shape = (n_envs, n_bodies * 3)
         self.contact_force_tensor = gymtorch.wrap_tensor(contact_force_tensor).view(self.num_envs, self.n_env_bodies, 3)
 
