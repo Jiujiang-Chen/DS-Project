@@ -182,7 +182,6 @@ def get_object_asset(asset_object_name):
 
     return object_assets[object_names.index(asset_object_name)]
 
-
 # control_joint_names = [
 #     "SMG_F1J1", "SMG_F1J2", "SMG_F1J3",
 #     "SMG_F2J1", "SMG_F2J2", "SMG_F2J3",
