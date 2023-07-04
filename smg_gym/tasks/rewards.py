@@ -195,6 +195,7 @@ def compute_stable_grasp(
     fall_reset_dist: float,
 
     # stable grasp components
+    thumb_tip_contacts: torch.Tensor,
     n_tip_contacts: torch.Tensor,
     n_non_tip_contacts: torch.Tensor,
     obj_base_pos: torch.Tensor,
@@ -213,10 +214,13 @@ def compute_stable_grasp(
     resets = torch.where(com_dist_rew >= fall_reset_dist, torch.ones_like(reset_buf), resets)
 
     # number of contacts to detect grasp
-    resets = torch.where(n_tip_contacts < 1, torch.ones_like(reset_buf), resets)
+    resets = torch.where(n_tip_contacts < 2, torch.ones_like(reset_buf), resets)
+
+    # thumb in contact 
+    resets = torch.where(thumb_tip_contacts == 0, torch.ones_like(reset_buf), resets)
 
     # number of non-tip contacts to detect bad grasp
-    resets = torch.where(n_non_tip_contacts >= 1, torch.ones_like(reset_buf), resets)
+    resets = torch.where(n_non_tip_contacts >= 2, torch.ones_like(reset_buf), resets)
 
     # max ep length is reached
     resets = torch.where(progress_buf >= max_episode_length, torch.ones_like(resets), resets)

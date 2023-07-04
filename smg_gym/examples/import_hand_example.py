@@ -1,14 +1,15 @@
 import os
 import numpy as np
 import random
+from isaacgym import gymtorch
 from isaacgym import gymutil
 from isaacgym import gymapi
 from isaacgym.torch_utils import *
 import inspect
 
-
 from smg_gym.assets import get_assets_path, add_assets_path
 
+from smg_gym.tasks.allegro_object_task_params import object_properties
 from pybullet_object_models import primitive_objects as object_set
 
 # initialize gym
@@ -79,12 +80,20 @@ env_lower = gymapi.Vec3(-spacing, -spacing, 0.0)
 env_upper = gymapi.Vec3(spacing, spacing, spacing)
 
 # create ball asset with gravity disabled from pybullet-object_models
-
+sphere_radius = object_properties["sphere"]['radius']
+box_size = object_properties['box']['size']
+capsule_radius = object_properties['capsule']['radius']
+capsule_width = object_properties['capsule']['width']
 
 def load_hand():
 
+    # asset_root = add_assets_path('robot_assets/smg_minitip')
+    # asset_file = "smg_tactip.urdf"
+    # tactip_name = "tactip_tip"
+
     asset_root = add_assets_path('robot_assets/allegro_hora')
     asset_file = "allegro_digitac.urdf"
+    tactip_name = "digitac_tip"
 
     asset_options = gymapi.AssetOptions()
     asset_options.disable_gravity = True
@@ -102,7 +111,20 @@ def load_hand():
 
     hand_asset = gym.load_asset(sim, asset_root, asset_file, asset_options)
 
-    return hand_asset
+    # set default hand link properties
+    hand_props = gym.get_asset_rigid_shape_properties(hand_asset)
+    unique_filter = 5
+    for p in hand_props:
+        p.friction = 2000.0
+        p.torsion_friction = 1000.0
+        p.rolling_friction = 0.0
+        p.restitution = 0.0
+        p.filter = unique_filter
+        unique_filter += 1
+        # p.thickness = 0.001
+    gym.set_asset_rigid_shape_properties(hand_asset, hand_props)
+
+    return hand_asset, tactip_name
 
 
 def load_objects():
@@ -111,18 +133,54 @@ def load_objects():
     asset_root = object_set.getDataPath()
 
     object_assets = []
+    object_names = []
     for object_name in model_list:
         asset_file = os.path.join(object_name, "model.urdf")
         asset_options = gymapi.AssetOptions()
-        asset_options.disable_gravity = False
+        asset_options.disable_gravity = True
         asset_options.fix_base_link = False
         asset_options.override_com = True
         asset_options.override_inertia = True
         obj_asset = gym.load_asset(sim, asset_root, asset_file, asset_options)
 
         object_assets.append(obj_asset)
+        object_names.append(object_name)
 
-    return object_assets
+
+    # Create standard objects and add to object assets
+    obj_asset = gym.create_sphere(
+        sim,
+        sphere_radius,
+        asset_options
+    )
+    object_assets.append(obj_asset)
+    object_names.append('gym_sphere')
+
+    obj_asset = gym.create_box(
+        sim,
+        box_size[0],
+        box_size[1],
+        box_size[2],
+        asset_options
+    )
+    object_assets.append(obj_asset)
+    object_names.append('gym_box')
+
+    obj_asset = gym.create_capsule(
+        sim,
+        capsule_radius,
+        capsule_width,
+        asset_options
+    )
+    object_assets.append(obj_asset)
+    object_names.append('gym_capsules')
+
+    return object_assets, object_names
+
+
+def get_object_asset(asset_object_name):
+
+    return object_assets[object_names.index(asset_object_name)]
 
 
 # control_joint_names = [
@@ -199,7 +257,9 @@ def add_hand_actor(env):
 
     gym.begin_aggregate(env, num_hand_bodies, num_hand_shapes, False)
 
-    handle = gym.create_actor(env, hand_asset, pose, "hand_actor_{}".format(i), -1, -1)
+    handle = gym.create_actor(env, hand_asset, pose, "hand_actor_{}".format(i), 0, -1)
+
+    rigid_body_names = gym.get_actor_rigid_body_names(env, handle)
 
     # Configure DOF properties
     props = gym.get_actor_dof_properties(env, handle)
@@ -207,6 +267,26 @@ def add_hand_actor(env):
     props["stiffness"] = [5000.0]*n_hand_dofs
     props["damping"] = [100.0]*n_hand_dofs
     gym.set_actor_dof_properties(env, handle, props)
+
+    # Configure actor rigid shape properties
+    indices = gym.get_actor_rigid_body_shape_indices(env, handle)
+    shape_props = gym.get_actor_rigid_shape_properties(env, handle)
+
+    # new_filter = 5
+    # for shape_prop in shape_props:
+    #     shape_prop.filter = new_filter
+    #     new_filter += 1
+    # success = gym.set_actor_rigid_shape_properties(env, handle, shape_props)
+    # print('success ', success)
+    
+    count = 0
+    for index in range(len(rigid_body_names)):
+        if indices[index].count:
+            filter = shape_props[count].filter
+            count += 1
+        else:
+            filter = None
+        print("{} {}: count {} start{} collision filter {} ".format(index, rigid_body_names[index], indices[index].count, indices[index].start, filter))
 
     # create actor handles
     control_handles = {}
@@ -226,19 +306,33 @@ def add_object_actor(env):
     # pose.p = gymapi.Vec3(0.0, 0.0, 0.275)
     # pose.r = gymapi.Quat(0, 0, 0, 1)
 
-    pose.p = gymapi.Vec3(0.0, 0.005, 0.32)
+    pose.p = gymapi.Vec3(0.0, -0.02, 0.36)
     pose.r = gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 1, 0), 0.0*np.pi) * gymapi.Quat.from_axis_angle(gymapi.Vec3(1, 0, 0), 0.5 * np.pi) * gymapi.Quat.from_axis_angle(gymapi.Vec3(0, 0, 1), 0.5 * np.pi)
 
-    object_asset = np.random.choice(object_assets)
-    handle = gym.create_actor(env, object_asset, pose, "obj_actor_{}".format(i), -1, -1)
+    # object_asset = np.random.choice(object_assets)
+    object_asset = get_object_asset('gym_sphere')
+    handle = gym.create_actor(env, object_asset, pose, "obj_actor_{}".format(i), 0, 2)
 
     obj_props = gym.get_actor_rigid_body_properties(env, handle)
     obj_props[0].mass = 1.0
     gym.set_actor_rigid_body_properties(env, handle, obj_props)
 
+    # set color of object
+    env_obj_color = gymapi.Vec3(1, 0, 0)
+    gym.set_rigid_body_color(
+        env,
+        handle,
+        0,
+        gymapi.MESH_VISUAL,
+        env_obj_color
+    )
+
     # set shape properties (some settings only work on FLEX backend)
     shape_props = gym.get_actor_rigid_shape_properties(env, handle)
     gym.set_actor_rigid_shape_properties(env, handle, shape_props)
+
+    obj_body_name = gym.get_actor_rigid_body_names(env, handle)
+    obj_body_idx = gym.find_actor_rigid_body_index(env, handle, obj_body_name[0], gymapi.DOMAIN_ENV)
 
     return handle, object_asset
 
@@ -252,7 +346,6 @@ def get_object_state(env, obj_actor_handle):
     ang_vel = obj_state['vel']['angular']
 
     return pos, orn, lin_vel, ang_vel
-
 
 def apply_gravity_compensation_object(env, obj_actor_handle):
 
@@ -287,7 +380,22 @@ def pre_physics_step():
 
 
 def post_physics_step():
+
+    gym.refresh_net_contact_force_tensor(sim)
+
     pos, orn, lin_vel, ang_vel = get_object_state(envs[i], object_actor_handles[i])
+
+    # Printing out contacts
+    # contacts = get_tip_contacts(envs[0], hand_actor_handles[0], object_actor_handles[0])
+    # print(contacts)
+
+    net_tip_contact_forces, tip_object_contacts, n_tip_contacts, n_non_tip_contacts = get_fingertip_contacts()
+
+    if any(tip_object_contacts[0]):
+        print("tip_contacted with n: ", tip_object_contacts[0])
+
+    if n_non_tip_contacts[0] > 0:
+        print("Non tip_contacted with : ", n_non_tip_contacts[0])
 
 
 def apply_grasp_action(current_joint_states):
@@ -297,10 +405,10 @@ def apply_grasp_action(current_joint_states):
     dt = sim_params.dt
 
     grasp_action = np.array([
-        0.0, act_lim, 0.0, 0.0,
-        0.0, act_lim, 0.0, 0.0,
-        0.0, act_lim, 0.0, 0.0,
-        0.0, act_lim, 0.0, 0.0,
+        0.0, act_lim, act_lim, 0.0,
+        0.0, act_lim, act_lim, 0.0,
+        0.0, act_lim, act_lim, 0.0,
+        act_lim, act_lim, act_lim, 0.0,
     ])
 
     for i in range(num_envs):
@@ -322,7 +430,7 @@ def get_tip_contacts(env, hand_actor_handle, obj_actor_handle):
     obj_body_idx = gym.find_actor_rigid_body_index(env, obj_actor_handle, obj_body_names[0], gymapi.DOMAIN_ENV)
 
     hand_body_names = gym.get_actor_rigid_body_names(env, hand_actor_handle)
-    tip_body_names = [name for name in hand_body_names if 'tactip_tip' in name]
+    tip_body_names = [name for name in hand_body_names if tactip_name in name]
     tip_body_idxs = [gym.find_actor_rigid_body_index(
         env, hand_actor_handle, name, gymapi.DOMAIN_ENV) for name in tip_body_names]
 
@@ -340,6 +448,57 @@ def get_tip_contacts(env, hand_actor_handle, obj_actor_handle):
 
     return tip_contacts
 
+def get_fingertip_contacts():
+
+    hand_body_names = gym.get_asset_rigid_body_names(hand_asset)
+    tip_body_names = [name for name in hand_body_names if tactip_name in name]
+    non_tip_body_names = [name for name in hand_body_names if tactip_name not in name]
+    tip_body_idxs = [
+        gym.find_asset_rigid_body_index(hand_asset, name) for name in tip_body_names
+    ]
+    non_tip_body_idxs = [
+        gym.find_asset_rigid_body_index(hand_asset, name) for name in non_tip_body_names
+    ]
+    n_tips = len(tip_body_idxs)
+    n_non_tip_links = len(non_tip_body_idxs)
+
+    # get envs where obj is contacted
+    bool_obj_contacts = torch.where(
+        torch.count_nonzero(contact_force_tensor[:, obj_body_idx, :], dim=1) > 0,
+        torch.ones(size=(num_envs,)),
+        torch.zeros(size=(num_envs,)),
+    )
+
+    # get envs where tips are contacted
+    net_tip_contact_forces = contact_force_tensor[:, tip_body_idxs, :]
+    bool_tip_contacts = torch.where(
+        torch.count_nonzero(net_tip_contact_forces, dim=2) > 0,
+        torch.ones(size=(num_envs, n_tips)),
+        torch.zeros(size=(num_envs, n_tips)),
+    )
+
+    # get all the contacted links that are not the tip
+    net_non_tip_contact_forces = contact_force_tensor[:, non_tip_body_idxs, :]
+    bool_non_tip_contacts = torch.where(
+        torch.count_nonzero(net_non_tip_contact_forces, dim=2) > 0,
+        torch.ones(size=(num_envs, n_non_tip_links)),
+        torch.zeros(size=(num_envs, n_non_tip_links)),
+    )
+    n_non_tip_contacts = torch.sum(bool_non_tip_contacts, dim=1)
+
+    # repeat for n_tips shape=(n_envs, n_tips)
+    onehot_obj_contacts = bool_obj_contacts.unsqueeze(1).repeat(1, n_tips)
+
+    # get envs where object and tips are contacted
+    tip_object_contacts = torch.where(
+        onehot_obj_contacts > 0,
+        bool_tip_contacts,
+        torch.zeros(size=(num_envs, n_tips))
+    )
+    n_tip_contacts = torch.sum(bool_tip_contacts, dim=1)
+
+    return net_tip_contact_forces, tip_object_contacts, n_tip_contacts, n_non_tip_contacts
+
 
 def initialise_contact(current_joint_states):
     max_steps = 50
@@ -350,10 +509,10 @@ def initialise_contact(current_joint_states):
         if update_envs == []:
             break
 
-        for i in update_envs:
-            # Disable gravity during grasping motion
-            apply_gravity_compensation_object(envs[i], object_actor_handles[i])
-            apply_grasp_action(current_joint_states)
+        # for i in update_envs:
+        #     # Disable gravity during grasping motion
+        #     apply_gravity_compensation_object(envs[i], object_actor_handles[i])
+        #     # apply_grasp_action(current_joint_states)
 
         # step the physics
         gym.simulate(sim)
@@ -390,8 +549,11 @@ def reset():
 
 
 # create hand asset
-hand_asset = load_hand()
-object_assets = load_objects()
+hand_asset, tactip_name = load_hand()
+object_assets, object_names = load_objects()
+
+# hand_body_names = gym.get_asset_rigid_body_names(hand_asset)
+# tcp_body_names = [name for name in hand_body_names if "tcp" in name]
 
 # create list to mantain environment and asset handles
 envs = []
@@ -414,10 +576,22 @@ for i in range(num_envs):
     object_actor_handles.append(object_handle)
     object_asset_list.append(object_asset)
 
+    obj_body_name = gym.get_actor_rigid_body_names(env, hand_actor_handle)
+    obj_body_idx = gym.find_actor_rigid_body_index(env, object_handle, obj_body_name[0], gymapi.DOMAIN_ENV)
+
+
 # print('Envs: ', envs)
 # print('Actors: ', hand_actor_handles)
 # print('Joints: ', hand_control_joint_hanles)
 # print('Init Joints: ', init_joint_poses)
+
+# get useful numbers
+n_sim_bodies = gym.get_sim_rigid_body_count(sim)
+n_env_bodies = gym.get_sim_rigid_body_count(sim) // num_envs
+
+# Set up some tensors
+contact_force_tensor = gym.acquire_net_contact_force_tensor(sim)    
+contact_force_tensor = gymtorch.wrap_tensor(contact_force_tensor).view(num_envs, n_env_bodies, 3)
 
 # look at the first env
 cam_pos = gymapi.Vec3(2, 2, 2)

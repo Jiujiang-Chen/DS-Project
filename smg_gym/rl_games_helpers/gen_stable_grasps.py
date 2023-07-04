@@ -25,12 +25,12 @@ from smg_gym.tasks import task_map
 ## OmegaConf & Hydra Config
 
 # Resolvers used in hydra configs (see https://omegaconf.readthedocs.io/en/2.1_branch/usage.html#resolvers)
-OmegaConf.register_new_resolver('eq', lambda x, y: x.lower() == y.lower())
-OmegaConf.register_new_resolver('contains', lambda x, y: x.lower() in y.lower())
-OmegaConf.register_new_resolver('if', lambda pred, a, b: a if pred else b)
+# OmegaConf.register_new_resolver('eq', lambda x, y: x.lower() == y.lower())
+# OmegaConf.register_new_resolver('contains', lambda x, y: x.lower() in y.lower())
+# OmegaConf.register_new_resolver('if', lambda pred, a, b: a if pred else b)
 # allows us to resolve default arguments which are copied in multiple places in the config.
 # used primarily for num_ensv
-OmegaConf.register_new_resolver('resolve_default', lambda default, arg: default if arg == '' else arg)
+# OmegaConf.register_new_resolver('resolve_default', lambda default, arg: default if arg == '' else arg)
 
 
 @hydra.main(config_name="config", config_path="./cfg")
@@ -52,6 +52,8 @@ def main(cfg: DictConfig):
         graphics_device_id=cfg.graphics_device_id,
         headless=cfg.headless,
     )
+
+    print('Running task: ', cfg.task_name)
 
     env.reset()
     while True:

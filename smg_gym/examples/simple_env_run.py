@@ -5,9 +5,9 @@ import torch
 import cv2
 
 n_envs = 100
-action_type = "random"
+action_type = "static"
 envs = smg_gym.make(
-	task="smg_reorient", 
+	task="allegro_grasp", 
 	num_envs=n_envs, 
 	sim_device="cuda:0",
 	rl_device="cuda:0",
@@ -22,7 +22,7 @@ for _ in range(1000):
 	if action_type == "random":
 		action = (max_action - min_action) *torch.rand((n_envs,)+envs.action_space.shape, device="cuda:0") + min_action # Random actions
 	elif action_type == "static":
-		torch.zeros((n_envs,)+envs.action_space.shape, device="cuda:0") # No actions#
+		action = torch.zeros((n_envs,)+envs.action_space.shape, device="cuda:0") # No actions#
 	else:
 		msg = "Invalid action type {}.".format(action_type)
 		raise ValueError(msg)
